@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ceylon 1802 — Admin</title>
+  <style>
+    :root { --bg:#1a1a1a; --panel:#222; --text:#d4c9a8; --accent:#c49a3c; --border:#3a3a3a; --danger:#c44040; --success:#4a9a4a; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { background:var(--bg); color:var(--text); font-family:'Courier New',monospace; font-size:14px; }
+    h1,h2,h3 { color:var(--accent); margin-bottom:12px; }
+    .container { max-width:1100px; margin:0 auto; padding:20px; }
+    .tabs { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:20px; border-bottom:1px solid var(--border); padding-bottom:8px; }
+    .tab { padding:8px 16px; background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:4px 4px 0 0; cursor:pointer; font-family:inherit; font-size:13px; }
+    .tab.active { background:var(--accent); color:#111; font-weight:bold; }
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
+    .grid { display:grid; grid-template-columns:300px 1fr; gap:20px; }
+    .list-panel { background:var(--panel); border:1px solid var(--border); border-radius:4px; max-height:70vh; overflow-y:auto; }
+    .list-item { padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; }
+    .list-item:hover { background:#333; }
+    .list-item.selected { background:var(--accent); color:#111; }
+    .list-item-title { font-weight:bold; }
+    .list-item-sub { font-size:12px; color:var(--text); opacity:0.6; }
+    .form-panel { background:var(--panel); border:1px solid var(--border); border-radius:4px; padding:20px; max-height:70vh; overflow-y:auto; }
+    label { display:block; margin-bottom:4px; font-size:12px; color:var(--accent); }
+    input,textarea,select { display:block; width:100%; padding:8px; margin-bottom:12px; background:#2a2a2a; border:1px solid var(--border); color:var(--text); font-family:inherit; font-size:13px; border-radius:3px; }
+    textarea { min-height:80px; resize:vertical; }
+    .btn { padding:8px 16px; border:none; border-radius:3px; cursor:pointer; font-family:inherit; font-size:13px; margin-right:8px; }
+    .btn-save { background:var(--success); color:#fff; }
+    .btn-new { background:var(--accent); color:#111; }
+    .btn-delete { background:var(--danger); color:#fff; }
+    .btn:hover { opacity:0.85; }
+    .row { display:flex; gap:12px; }
+    .row > * { flex:1; }
+    .stats-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; margin-bottom:20px; }
+    .stat-card { background:var(--panel); border:1px solid var(--border); border-radius:4px; padding:16px; text-align:center; }
+    .stat-value { font-size:2em; color:var(--accent); font-weight:bold; }
+    .stat-label { font-size:12px; color:var(--text); opacity:0.7; }
+    .msg { padding:8px; margin:8px 0; border-radius:3px; font-size:13px; }
+    .msg-ok { background:#2a4a2a; color:var(--success); }
+    .msg-err { background:#4a2a2a; color:var(--danger); }
+    #login-panel { max-width:300px; margin:100px auto; text-align:center; }
+  </style>
+</head>
+<body>
+  <div id="login-panel">
+    <h2>Admin Login</h2>
+    <input type="text" id="admin-user" placeholder="Username">
+    <input type="password" id="admin-pass" placeholder="Password">
+    <button class="btn btn-save" id="btn-admin-login">Login</button>
+    <div id="admin-login-err" class="msg msg-err" style="display:none;"></div>
+  </div>
+
+  <div id="admin-app" style="display:none;">
+    <div class="container">
+      <h1>Ceylon 1802 — World Admin</h1>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="dashboard">Dashboard</button>
+        <button class="tab" data-tab="regions">Regions</button>
+        <button class="tab" data-tab="rooms">Rooms</button>
+        <button class="tab" data-tab="items">Items</button>
+        <button class="tab" data-tab="npcs">NPCs</button>
+        <button class="tab" data-tab="creatures">Creatures</button>
+        <button class="tab" data-tab="quests">Quests</button>
+        <button class="tab" data-tab="skills">Skills</button>
+        <button class="tab" data-tab="players">Players</button>
+      </div>
+
+      <!-- Dashboard -->
+      <div class="tab-content active" id="tab-dashboard">
+        <h2>World Overview</h2>
+        <div class="stats-grid" id="stats-grid"></div>
+        <h3>Online Players</h3>
+        <div id="online-list"></div>
+      </div>
+
+      <!-- Rooms -->
+      <div class="tab-content" id="tab-rooms">
+        <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-room">+ New Room</button></div>
+        <div class="grid">
+          <div class="list-panel" id="room-list"></div>
+          <div class="form-panel" id="room-form"><p style="color:var(--text);opacity:0.5;">Select or create a room</p></div>
+        </div>
+      </div>
+
+      <!-- Regions -->
+      <div class="tab-content" id="tab-regions">
+        <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-region">+ New Region</button></div>
+        <div class="grid">
+          <div class="list-panel" id="region-list"></div>
+          <div class="form-panel" id="region-form"><p style="color:var(--text);opacity:0.5;">Select or create a region</p></div>
+        </div>
+      </div>
+
+      <!-- Items -->
+      <div class="tab-content" id="tab-items">
+        <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-item">+ New Item</button></div>
+        <div class="grid">
+          <div class="list-panel" id="item-list"></div>
+          <div class="form-panel" id="item-form"><p style="color:var(--text);opacity:0.5;">Select or create an item</p></div>
+        </div>
+      </div>
+
+      <!-- NPCs -->
+      <div class="tab-content" id="tab-npcs">
+        <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-npc">+ New NPC</button></div>
+        <div class="grid">
+          <div class="list-panel" id="npc-list"></div>
+          <div class="form-panel" id="npc-form"><p style="color:var(--text);opacity:0.5;">Select or create an NPC</p></div>
+        </div>
+      </div>
+
+      <!-- Creatures -->
+      <div class="tab-content" id="tab-creatures">
+        <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-creature">+ New Creature</button></div>
+        <div class="grid">
+          <div class="list-panel" id="creature-list"></div>
+          <div class="form-panel" id="creature-form"><p style="color:var(--text);opacity:0.5;">Select or create a creature</p></div>
+        </div>
+      </div>
+
+      <!-- Quests -->
+      <div class="tab-content" id="tab-quests">
+        <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-quest">+ New Quest</button></div>
+        <div class="grid">
+          <div class="list-panel" id="quest-list"></div>
+          <div class="form-panel" id="quest-form"><p style="color:var(--text);opacity:0.5;">Select or create a quest</p></div>
+        </div>
+      </div>
+
+      <!-- Skills -->
+      <div class="tab-content" id="tab-skills">
+        <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-skill">+ New Skill</button></div>
+        <div class="grid">
+          <div class="list-panel" id="skill-list"></div>
+          <div class="form-panel" id="skill-form"><p style="color:var(--text);opacity:0.5;">Select or create a skill</p></div>
+        </div>
+      </div>
+
+      <!-- Players -->
+      <div class="tab-content" id="tab-players">
+        <h2>Player Management</h2>
+        <div class="list-panel" id="player-list" style="max-width:600px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    let accountId = null;
+    const headers = () => ({ 'Content-Type':'application/json', 'X-Account-Id': accountId });
+
+    // Login
+    document.getElementById('btn-admin-login').addEventListener('click', async () => {
+      const user = document.getElementById('admin-user').value;
+      const pass = document.getElementById('admin-pass').value;
+      try {
+        const res = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:user,password:pass}) });
+        const data = await res.json();
+        if (!res.ok || !data.isAdmin) { showErr('Not authorized'); return; }
+        accountId = data.accountId;
+        document.getElementById('login-panel').style.display = 'none';
+        document.getElementById('admin-app').style.display = 'block';
+        loadDashboard();
+      } catch(e) { showErr('Connection error'); }
+    });
+
+    function showErr(msg) {
+      const el = document.getElementById('admin-login-err');
+      el.textContent = msg; el.style.display = 'block';
+    }
+
+    // Tabs
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+        loadTab(tab.dataset.tab);
+      });
+    });
+
+    function loadTab(name) {
+      switch(name) {
+        case 'dashboard': loadDashboard(); break;
+        case 'rooms': loadRooms(); break;
+        case 'regions': loadRegions(); break;
+        case 'items': loadItems(); break;
+        case 'npcs': loadNpcs(); break;
+        case 'creatures': loadCreatures(); break;
+        case 'quests': loadQuests(); break;
+        case 'skills': loadSkills(); break;
+        case 'players': loadPlayers(); break;
+      }
+    }
+
+    async function api(path, method='GET', body=null) {
+      const opts = { method, headers: headers() };
+      if (body) opts.body = JSON.stringify(body);
+      const res = await fetch('/api/admin' + path, opts);
+      return res.json();
+    }
+
+    // Dashboard
+    async function loadDashboard() {
+      const data = await api('/analytics');
+      const grid = document.getElementById('stats-grid');
+      grid.innerHTML = `
+        <div class="stat-card"><div class="stat-value">${data.totalRooms}</div><div class="stat-label">Rooms</div></div>
+        <div class="stat-card"><div class="stat-value">${data.totalNpcs}</div><div class="stat-label">NPCs</div></div>
+        <div class="stat-card"><div class="stat-value">${data.totalItems}</div><div class="stat-label">Items</div></div>
+        <div class="stat-card"><div class="stat-value">${data.totalQuests}</div><div class="stat-label">Quests</div></div>
+        <div class="stat-card"><div class="stat-value">${data.totalCharacters}</div><div class="stat-label">Characters</div></div>
+        <div class="stat-card"><div class="stat-value">${data.onlinePlayers.length}</div><div class="stat-label">Online Now</div></div>
+      `;
+      const ol = document.getElementById('online-list');
+      if (data.onlinePlayers.length === 0) { ol.innerHTML = '<p style="opacity:0.5;">No players online</p>'; }
+      else { ol.innerHTML = data.onlinePlayers.map(p => `<div class="list-item"><span class="list-item-title">${p.name}</span> <span class="list-item-sub">in ${p.roomId}</span></div>`).join(''); }
+    }
+
+    // Generic CRUD helpers
+    function renderList(panelId, items, titleKey, subKey) {
+      const el = document.getElementById(panelId);
+      el.innerHTML = items.map((item, i) =>
+        `<div class="list-item" data-index="${i}"><div class="list-item-title">${esc(item[titleKey]||item.id)}</div><div class="list-item-sub">${esc(String(item[subKey]||''))}</div></div>`
+      ).join('');
+      return items;
+    }
+
+    function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+    // ---- Rooms ----
+    let roomsCache = [];
+    async function loadRooms() {
+      roomsCache = await api('/rooms');
+      renderList('room-list', roomsCache, 'title', 'region_id');
+      document.querySelectorAll('#room-list .list-item').forEach(el => {
+        el.addEventListener('click', () => showRoomForm(roomsCache[el.dataset.index]));
+      });
+    }
+    document.getElementById('btn-new-room').addEventListener('click', () => showRoomForm({}));
+
+    function showRoomForm(room) {
+      const f = document.getElementById('room-form');
+      f.innerHTML = `
+        <h3>${room.id ? 'Edit' : 'New'} Room</h3>
+        <label>ID</label><input id="rf-id" value="${room.id||''}" ${room.id?'readonly':''}>
+        <label>Region ID</label><input id="rf-region" value="${room.region_id||''}">
+        <label>Title</label><input id="rf-title" value="${esc(room.title||'')}">
+        <label>Long Description</label><textarea id="rf-desc">${esc(room.description_long||'')}</textarea>
+        <label>Short Description</label><input id="rf-short" value="${esc(room.description_short||'')}">
+        <div class="row">
+          <div><label>Terrain</label><input id="rf-terrain" value="${room.terrain_type||'urban'}"></div>
+          <div><label>Safe Zone</label><select id="rf-safe"><option value="0" ${room.safe_zone?'':'selected'}>No</option><option value="1" ${room.safe_zone?'selected':''}>Yes</option></select></div>
+          <div><label>Light</label><input id="rf-light" value="${room.light_level||'bright'}"></div>
+        </div>
+        <label>Spawn Table ID</label><input id="rf-spawn" value="${room.spawn_table_id||''}">
+        <label>Resource Nodes (JSON)</label><textarea id="rf-resources">${typeof room.resource_nodes==='string'?room.resource_nodes:JSON.stringify(room.resource_nodes||[],null,2)}</textarea>
+        <label>Room Tags (JSON)</label><input id="rf-tags" value="${typeof room.room_tags==='string'?room.room_tags:JSON.stringify(room.room_tags||[])}">
+        <label>Ambient Text (JSON)</label><textarea id="rf-ambient">${typeof room.ambient_text_pool==='string'?room.ambient_text_pool:JSON.stringify(room.ambient_text_pool||[],null,2)}</textarea>
+        <label>Interactable Objects (JSON)</label><textarea id="rf-objects">${typeof room.interactable_objects==='string'?room.interactable_objects:JSON.stringify(room.interactable_objects||[],null,2)}</textarea>
+        <div id="rf-msg"></div>
+        <button class="btn btn-save" id="rf-save">Save Room</button>
+        ${room.id?'<button class="btn btn-delete" id="rf-del">Delete</button>':''}
+      `;
+      document.getElementById('rf-save').addEventListener('click', async () => {
+        try {
+          const body = {
+            id: document.getElementById('rf-id').value || undefined,
+            region_id: document.getElementById('rf-region').value,
+            title: document.getElementById('rf-title').value,
+            description_long: document.getElementById('rf-desc').value,
+            description_short: document.getElementById('rf-short').value,
+            terrain_type: document.getElementById('rf-terrain').value,
+            safe_zone: document.getElementById('rf-safe').value === '1',
+            light_level: document.getElementById('rf-light').value,
+            spawn_table_id: document.getElementById('rf-spawn').value || null,
+            resource_nodes: JSON.parse(document.getElementById('rf-resources').value || '[]'),
+            room_tags: JSON.parse(document.getElementById('rf-tags').value || '[]'),
+            ambient_text_pool: JSON.parse(document.getElementById('rf-ambient').value || '[]'),
+            interactable_objects: JSON.parse(document.getElementById('rf-objects').value || '[]'),
+          };
+          await api('/rooms', 'POST', body);
+          document.getElementById('rf-msg').innerHTML = '<div class="msg msg-ok">Saved!</div>';
+          loadRooms();
+        } catch(e) { document.getElementById('rf-msg').innerHTML = '<div class="msg msg-err">Error: '+e.message+'</div>'; }
+      });
+      if (room.id) {
+        document.getElementById('rf-del').addEventListener('click', async () => {
+          if (confirm('Delete this room?')) { await api('/rooms/'+room.id, 'DELETE'); loadRooms(); f.innerHTML='<p>Deleted</p>'; }
+        });
+      }
+    }
+
+    // ---- Regions ----
+    let regionsCache = [];
+    async function loadRegions() {
+      regionsCache = await api('/regions');
+      renderList('region-list', regionsCache, 'name', 'description');
+      document.querySelectorAll('#region-list .list-item').forEach(el => {
+        el.addEventListener('click', () => showRegionForm(regionsCache[el.dataset.index]));
+      });
+    }
+    document.getElementById('btn-new-region').addEventListener('click', () => showRegionForm({}));
+
+    function showRegionForm(r) {
+      const f = document.getElementById('region-form');
+      f.innerHTML = `
+        <h3>${r.id?'Edit':'New'} Region</h3>
+        <label>ID</label><input id="rgf-id" value="${r.id||''}" ${r.id?'readonly':''}>
+        <label>Name</label><input id="rgf-name" value="${esc(r.name||'')}">
+        <label>Description</label><textarea id="rgf-desc">${esc(r.description||'')}</textarea>
+        <div class="row"><div><label>Level Min</label><input type="number" id="rgf-min" value="${r.level_range_min||1}"></div><div><label>Level Max</label><input type="number" id="rgf-max" value="${r.level_range_max||5}"></div></div>
+        <div id="rgf-msg"></div>
+        <button class="btn btn-save" id="rgf-save">Save</button>
+      `;
+      document.getElementById('rgf-save').addEventListener('click', async () => {
+        await api('/regions','POST',{ id:document.getElementById('rgf-id').value||undefined, name:document.getElementById('rgf-name').value, description:document.getElementById('rgf-desc').value, level_range_min:+document.getElementById('rgf-min').value, level_range_max:+document.getElementById('rgf-max').value });
+        document.getElementById('rgf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadRegions();
+      });
+    }
+
+    // ---- Items ----
+    let itemsCache = [];
+    async function loadItems() {
+      itemsCache = await api('/items');
+      renderList('item-list', itemsCache, 'name', 'category');
+      document.querySelectorAll('#item-list .list-item').forEach(el => {
+        el.addEventListener('click', () => showItemForm(itemsCache[el.dataset.index]));
+      });
+    }
+    document.getElementById('btn-new-item').addEventListener('click', () => showItemForm({}));
+
+    function showItemForm(item) {
+      const f = document.getElementById('item-form');
+      f.innerHTML = `
+        <h3>${item.id?'Edit':'New'} Item</h3>
+        <label>ID</label><input id="if-id" value="${item.id||''}" ${item.id?'readonly':''}>
+        <label>Name</label><input id="if-name" value="${esc(item.name||'')}">
+        <label>Description</label><textarea id="if-desc">${esc(item.description||'')}</textarea>
+        <div class="row">
+          <div><label>Category</label><select id="if-cat"><option>weapon</option><option>armor</option><option>food</option><option>tool</option><option>resource</option><option>medicine</option><option>misc</option></select></div>
+          <div><label>Slot</label><input id="if-slot" value="${item.slot||''}"></div>
+        </div>
+        <div class="row">
+          <div><label>Weight</label><input type="number" step="0.1" id="if-weight" value="${item.weight||1}"></div>
+          <div><label>Value (copper)</label><input type="number" id="if-value" value="${item.value||0}"></div>
+          <div><label>Rarity</label><select id="if-rarity"><option>common</option><option>uncommon</option><option>rare</option><option>epic</option><option>legendary</option></select></div>
+        </div>
+        <div class="row">
+          <div><label>Stackable</label><select id="if-stack"><option value="0">No</option><option value="1">Yes</option></select></div>
+          <div><label>Max Stack</label><input type="number" id="if-maxstack" value="${item.max_stack||1}"></div>
+          <div><label>Durability</label><input type="number" id="if-dur" value="${item.durability_max||100}"></div>
+        </div>
+        <label>Properties (JSON)</label><textarea id="if-props">${typeof item.properties==='string'?item.properties:JSON.stringify(item.properties||{},null,2)}</textarea>
+        <label>Tags (JSON)</label><input id="if-tags" value="${typeof item.tags==='string'?item.tags:JSON.stringify(item.tags||[])}">
+        <label>Lore Text</label><textarea id="if-lore">${esc(item.lore_text||'')}</textarea>
+        <div id="if-msg"></div>
+        <button class="btn btn-save" id="if-save">Save</button>
+      `;
+      if(item.category) document.getElementById('if-cat').value = item.category;
+      if(item.rarity) document.getElementById('if-rarity').value = item.rarity;
+      if(item.stackable) document.getElementById('if-stack').value = '1';
+      document.getElementById('if-save').addEventListener('click', async () => {
+        try {
+          await api('/items','POST',{
+            id:document.getElementById('if-id').value||undefined, name:document.getElementById('if-name').value,
+            description:document.getElementById('if-desc').value, category:document.getElementById('if-cat').value,
+            slot:document.getElementById('if-slot').value||null, weight:+document.getElementById('if-weight').value,
+            value:+document.getElementById('if-value').value, rarity:document.getElementById('if-rarity').value,
+            stackable:document.getElementById('if-stack').value==='1', max_stack:+document.getElementById('if-maxstack').value,
+            durability_max:+document.getElementById('if-dur').value, properties:JSON.parse(document.getElementById('if-props').value||'{}'),
+            tags:JSON.parse(document.getElementById('if-tags').value||'[]'), lore_text:document.getElementById('if-lore').value||null
+          });
+          document.getElementById('if-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadItems();
+        } catch(e) { document.getElementById('if-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
+      });
+    }
+
+    // ---- NPCs ----
+    let npcsCache = [];
+    async function loadNpcs() {
+      npcsCache = await api('/npcs');
+      renderList('npc-list', npcsCache, 'name', 'role');
+      document.querySelectorAll('#npc-list .list-item').forEach(el => {
+        el.addEventListener('click', () => showNpcForm(npcsCache[el.dataset.index]));
+      });
+    }
+    document.getElementById('btn-new-npc').addEventListener('click', () => showNpcForm({}));
+
+    function showNpcForm(npc) {
+      const f = document.getElementById('npc-form');
+      f.innerHTML = `
+        <h3>${npc.id?'Edit':'New'} NPC</h3>
+        <label>ID</label><input id="nf-id" value="${npc.id||''}" ${npc.id?'readonly':''}>
+        <label>Name</label><input id="nf-name" value="${esc(npc.name||'')}">
+        <div class="row"><div><label>Role</label><input id="nf-role" value="${npc.role||''}"></div><div><label>Room ID</label><input id="nf-room" value="${npc.room_id||''}"></div></div>
+        <label>Description</label><textarea id="nf-desc">${esc(npc.description||'')}</textarea>
+        <label>Speech Style</label><input id="nf-speech" value="${esc(npc.speech_style||'')}">
+        <label>Backstory</label><textarea id="nf-backstory">${esc(npc.backstory||'')}</textarea>
+        <label>Dialogue Tree (JSON)</label><textarea id="nf-dialogue" style="min-height:120px;">${typeof npc.dialogue_tree==='string'?npc.dialogue_tree:JSON.stringify(npc.dialogue_tree||{},null,2)}</textarea>
+        <label>Shop Inventory (JSON)</label><textarea id="nf-shop">${typeof npc.shop_inventory==='string'?npc.shop_inventory:JSON.stringify(npc.shop_inventory||[],null,2)}</textarea>
+        <label>Quest Links (JSON)</label><input id="nf-quests" value="${typeof npc.quest_links==='string'?npc.quest_links:JSON.stringify(npc.quest_links||[])}">
+        <label>AI Prompt Base</label><textarea id="nf-ai">${esc(npc.ai_prompt_base||'')}</textarea>
+        <label>Knowledge Tags (JSON)</label><input id="nf-knowledge" value="${typeof npc.knowledge_tags==='string'?npc.knowledge_tags:JSON.stringify(npc.knowledge_tags||[])}">
+        <div id="nf-msg"></div>
+        <button class="btn btn-save" id="nf-save">Save</button>
+      `;
+      document.getElementById('nf-save').addEventListener('click', async () => {
+        try {
+          await api('/npcs','POST',{
+            id:document.getElementById('nf-id').value||undefined, name:document.getElementById('nf-name').value,
+            role:document.getElementById('nf-role').value, room_id:document.getElementById('nf-room').value||null,
+            description:document.getElementById('nf-desc').value, speech_style:document.getElementById('nf-speech').value,
+            backstory:document.getElementById('nf-backstory').value,
+            dialogue_tree:JSON.parse(document.getElementById('nf-dialogue').value||'{}'),
+            shop_inventory:JSON.parse(document.getElementById('nf-shop').value||'[]'),
+            quest_links:JSON.parse(document.getElementById('nf-quests').value||'[]'),
+            ai_prompt_base:document.getElementById('nf-ai').value,
+            knowledge_tags:JSON.parse(document.getElementById('nf-knowledge').value||'[]'),
+          });
+          document.getElementById('nf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadNpcs();
+        } catch(e) { document.getElementById('nf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
+      });
+    }
+
+    // ---- Creatures ----
+    let creaturesCache = [];
+    async function loadCreatures() {
+      creaturesCache = await api('/creatures');
+      renderList('creature-list', creaturesCache, 'name', 'level');
+      document.querySelectorAll('#creature-list .list-item').forEach(el => {
+        el.addEventListener('click', () => showCreatureForm(creaturesCache[el.dataset.index]));
+      });
+    }
+    document.getElementById('btn-new-creature').addEventListener('click', () => showCreatureForm({}));
+
+    function showCreatureForm(c) {
+      const f = document.getElementById('creature-form');
+      f.innerHTML = `
+        <h3>${c.id?'Edit':'New'} Creature</h3>
+        <label>ID</label><input id="cf-id" value="${c.id||''}" ${c.id?'readonly':''}>
+        <label>Name</label><input id="cf-name" value="${esc(c.name||'')}">
+        <label>Description</label><textarea id="cf-desc">${esc(c.description||'')}</textarea>
+        <div class="row"><div><label>Level</label><input type="number" id="cf-level" value="${c.level||1}"></div><div><label>HP</label><input type="number" id="cf-hp" value="${c.health_max||20}"></div></div>
+        <div class="row"><div><label>Atk Min</label><input type="number" id="cf-amin" value="${c.attack_min||2}"></div><div><label>Atk Max</label><input type="number" id="cf-amax" value="${c.attack_max||6}"></div><div><label>Defense</label><input type="number" id="cf-def" value="${c.defense||1}"></div></div>
+        <div class="row"><div><label>Accuracy</label><input type="number" id="cf-acc" value="${c.accuracy||60}"></div><div><label>Dodge</label><input type="number" id="cf-dodge" value="${c.dodge||10}"></div><div><label>Atk Speed (s)</label><input type="number" step="0.5" id="cf-spd" value="${c.attack_speed||3}"></div></div>
+        <label>Behavior</label><select id="cf-behav"><option>aggressive</option><option>territorial</option><option>passive</option><option>ranged</option></select>
+        <label>XP Reward</label><input type="number" id="cf-xp" value="${c.experience_reward||10}">
+        <label>Loot Table (JSON)</label><textarea id="cf-loot">${typeof c.loot_table==='string'?c.loot_table:JSON.stringify(c.loot_table||[],null,2)}</textarea>
+        <div id="cf-msg"></div>
+        <button class="btn btn-save" id="cf-save">Save</button>
+      `;
+      if(c.behavior) document.getElementById('cf-behav').value = c.behavior;
+      document.getElementById('cf-save').addEventListener('click', async () => {
+        try {
+          await api('/creatures','POST',{
+            id:document.getElementById('cf-id').value||undefined, name:document.getElementById('cf-name').value,
+            description:document.getElementById('cf-desc').value, level:+document.getElementById('cf-level').value,
+            health_max:+document.getElementById('cf-hp').value, attack_min:+document.getElementById('cf-amin').value,
+            attack_max:+document.getElementById('cf-amax').value, defense:+document.getElementById('cf-def').value,
+            accuracy:+document.getElementById('cf-acc').value, dodge:+document.getElementById('cf-dodge').value,
+            attack_speed:+document.getElementById('cf-spd').value, behavior:document.getElementById('cf-behav').value,
+            experience_reward:+document.getElementById('cf-xp').value,
+            loot_table:JSON.parse(document.getElementById('cf-loot').value||'[]'),
+          });
+          document.getElementById('cf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadCreatures();
+        } catch(e) { document.getElementById('cf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
+      });
+    }
+
+    // ---- Quests ----
+    let questsCache = [];
+    async function loadQuests() {
+      questsCache = await api('/quests');
+      renderList('quest-list', questsCache, 'name', 'category');
+      document.querySelectorAll('#quest-list .list-item').forEach(el => {
+        el.addEventListener('click', () => showQuestForm(questsCache[el.dataset.index]));
+      });
+    }
+    document.getElementById('btn-new-quest').addEventListener('click', () => showQuestForm({}));
+
+    function showQuestForm(q) {
+      const f = document.getElementById('quest-form');
+      f.innerHTML = `
+        <h3>${q.id?'Edit':'New'} Quest</h3>
+        <label>ID</label><input id="qf-id" value="${q.id||''}" ${q.id?'readonly':''}>
+        <label>Name</label><input id="qf-name" value="${esc(q.name||'')}">
+        <label>Description</label><textarea id="qf-desc">${esc(q.description||'')}</textarea>
+        <label>Quest Giver NPC ID</label><input id="qf-npc" value="${q.quest_giver_npc_id||''}">
+        <div class="row"><div><label>Level Req</label><input type="number" id="qf-level" value="${q.level_requirement||1}"></div><div><label>Category</label><input id="qf-cat" value="${q.category||'errand'}"></div><div><label>Repeatable</label><select id="qf-repeat"><option value="0">No</option><option value="1">Yes</option></select></div></div>
+        <label>Objectives (JSON)</label><textarea id="qf-obj">${typeof q.objectives==='string'?q.objectives:JSON.stringify(q.objectives||[],null,2)}</textarea>
+        <label>Rewards (JSON)</label><textarea id="qf-rew">${typeof q.rewards==='string'?q.rewards:JSON.stringify(q.rewards||{},null,2)}</textarea>
+        <div id="qf-msg"></div>
+        <button class="btn btn-save" id="qf-save">Save</button>
+      `;
+      if(q.repeatable) document.getElementById('qf-repeat').value = '1';
+      document.getElementById('qf-save').addEventListener('click', async () => {
+        try {
+          await api('/quests','POST',{
+            id:document.getElementById('qf-id').value||undefined, name:document.getElementById('qf-name').value,
+            description:document.getElementById('qf-desc').value, quest_giver_npc_id:document.getElementById('qf-npc').value||null,
+            level_requirement:+document.getElementById('qf-level').value, category:document.getElementById('qf-cat').value,
+            repeatable:document.getElementById('qf-repeat').value==='1',
+            objectives:JSON.parse(document.getElementById('qf-obj').value||'[]'),
+            rewards:JSON.parse(document.getElementById('qf-rew').value||'{}'),
+          });
+          document.getElementById('qf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadQuests();
+        } catch(e) { document.getElementById('qf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
+      });
+    }
+
+    // ---- Skills ----
+    let skillsCache = [];
+    async function loadSkills() {
+      skillsCache = await api('/skills');
+      renderList('skill-list', skillsCache, 'name', 'category');
+      document.querySelectorAll('#skill-list .list-item').forEach(el => {
+        el.addEventListener('click', () => showSkillForm(skillsCache[el.dataset.index]));
+      });
+    }
+    document.getElementById('btn-new-skill').addEventListener('click', () => showSkillForm({}));
+
+    function showSkillForm(s) {
+      const f = document.getElementById('skill-form');
+      f.innerHTML = `
+        <h3>${s.id?'Edit':'New'} Skill</h3>
+        <label>ID</label><input id="sf-id" value="${s.id||''}" ${s.id?'readonly':''}>
+        <label>Name</label><input id="sf-name" value="${esc(s.name||'')}">
+        <label>Category</label><input id="sf-cat" value="${s.category||''}">
+        <label>Description</label><textarea id="sf-desc">${esc(s.description||'')}</textarea>
+        <div id="sf-msg"></div>
+        <button class="btn btn-save" id="sf-save">Save</button>
+      `;
+      document.getElementById('sf-save').addEventListener('click', async () => {
+        await api('/skills','POST',{ id:document.getElementById('sf-id').value||undefined, name:document.getElementById('sf-name').value, category:document.getElementById('sf-cat').value, description:document.getElementById('sf-desc').value });
+        document.getElementById('sf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadSkills();
+      });
+    }
+
+    // ---- Players ----
+    async function loadPlayers() {
+      const players = await api('/players');
+      const el = document.getElementById('player-list');
+      el.innerHTML = players.map(p =>
+        `<div class="list-item"><div class="list-item-title">${esc(p.name)} <span class="list-item-sub">(${esc(p.username)})</span></div><div class="list-item-sub">Level ${p.level} | Last active: ${p.last_active||'never'}</div></div>`
+      ).join('');
+    }
+  })();
+  </script>
+</body>
+</html>

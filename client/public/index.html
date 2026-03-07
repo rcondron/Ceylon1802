@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Ceylon 1802</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Login/Register Screen -->
+  <div id="screen-auth" class="screen active">
+    <div class="auth-container">
+      <h1 class="game-title">Ceylon 1802</h1>
+      <p class="subtitle">A Text Adventure in the Age of Spice</p>
+
+      <div id="auth-login" class="auth-panel">
+        <input type="text" id="login-username" placeholder="Username" autocomplete="username" maxlength="20">
+        <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+        <button id="btn-login" class="btn-primary">Enter Game</button>
+        <button id="btn-show-register" class="btn-link">Create Account</button>
+        <div id="login-error" class="error-msg"></div>
+      </div>
+
+      <div id="auth-register" class="auth-panel hidden">
+        <input type="text" id="reg-username" placeholder="Username" autocomplete="username" maxlength="20">
+        <input type="password" id="reg-password" placeholder="Password (4+ chars)" autocomplete="new-password">
+        <button id="btn-register" class="btn-primary">Create Account</button>
+        <button id="btn-show-login" class="btn-link">Back to Login</button>
+        <div id="reg-error" class="error-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Character Select/Create Screen -->
+  <div id="screen-character" class="screen">
+    <div class="auth-container">
+      <h2>Choose Your Character</h2>
+      <div id="character-list"></div>
+
+      <div id="character-create" class="char-create">
+        <h3>Create New Character</h3>
+        <input type="text" id="char-name" placeholder="Character Name (letters only)" maxlength="20">
+        <select id="char-background">
+          <option value="deckhand">Deckhand — Strong, tough, ready for labor</option>
+          <option value="ships_clerk">Ship's Clerk — Smart, perceptive, organized</option>
+          <option value="traders_assistant">Trader's Assistant — Charming, sharp, social</option>
+          <option value="runaway_apprentice">Runaway Apprentice — Quick, observant</option>
+          <option value="farmers_child">Farmer's Child — Tough, strong, hardworking</option>
+          <option value="former_soldier">Former Soldier — Strongest fighter start</option>
+          <option value="temple_student">Temple Student — Wise, willful, spiritual</option>
+          <option value="fishermans_kin">Fisherman's Kin — Perceptive, nimble, fishing gear</option>
+        </select>
+        <button id="btn-create-char" class="btn-primary">Create Character</button>
+        <div id="char-error" class="error-msg"></div>
+      </div>
+
+      <button id="btn-logout" class="btn-link">Logout</button>
+    </div>
+  </div>
+
+  <!-- Game Screen -->
+  <div id="screen-game" class="screen">
+    <!-- Top bar -->
+    <div id="top-bar">
+      <div id="room-title">Ceylon 1802</div>
+      <div id="player-stats">
+        <span id="stat-hp" class="stat" title="Health">HP: --</span>
+        <span id="stat-sp" class="stat" title="Stamina">SP: --</span>
+        <span id="stat-level" class="stat" title="Level">Lv: --</span>
+      </div>
+    </div>
+
+    <!-- Exit chips -->
+    <div id="exits-bar"></div>
+
+    <!-- Main text output -->
+    <div id="game-log"></div>
+
+    <!-- Entities panel -->
+    <div id="entities-panel" class="hidden">
+      <div id="entities-list"></div>
+    </div>
+
+    <!-- Bottom controls -->
+    <div id="bottom-controls">
+      <!-- Quick action row -->
+      <div id="action-row">
+        <button class="action-btn" data-cmd="look">Look</button>
+        <button class="action-btn" data-cmd="inventory">Inv</button>
+        <button class="action-btn" data-cmd="status">Status</button>
+        <button class="action-btn" data-cmd="skills">Skills</button>
+        <button class="action-btn" data-cmd="quests">Quests</button>
+        <button class="action-btn" data-cmd="who">Who</button>
+        <button class="action-btn" data-cmd="map">Map</button>
+        <button class="action-btn" data-cmd="help">Help</button>
+      </div>
+
+      <!-- Combat/action row (shown contextually) -->
+      <div id="combat-row" class="hidden">
+        <button class="action-btn combat" data-cmd="attack">Attack</button>
+        <button class="action-btn combat" data-cmd="flee">Flee</button>
+        <button class="action-btn" data-cmd="forage">Forage</button>
+        <button class="action-btn" data-cmd="fish">Fish</button>
+      </div>
+
+      <!-- Directional pad -->
+      <div id="dpad">
+        <div class="dpad-row">
+          <button class="dir-btn" data-cmd="nw">NW</button>
+          <button class="dir-btn dir-main" data-cmd="n">N</button>
+          <button class="dir-btn" data-cmd="ne">NE</button>
+        </div>
+        <div class="dpad-row">
+          <button class="dir-btn dir-main" data-cmd="w">W</button>
+          <button class="dir-btn dir-center" data-cmd="look">Look</button>
+          <button class="dir-btn dir-main" data-cmd="e">E</button>
+        </div>
+        <div class="dpad-row">
+          <button class="dir-btn" data-cmd="sw">SW</button>
+          <button class="dir-btn dir-main" data-cmd="s">S</button>
+          <button class="dir-btn" data-cmd="se">SE</button>
+        </div>
+        <div class="dpad-row dpad-vertical">
+          <button class="dir-btn" data-cmd="u">Up</button>
+          <button class="dir-btn" data-cmd="d">Down</button>
+          <button class="dir-btn" data-cmd="in">In</button>
+          <button class="dir-btn" data-cmd="out">Out</button>
+        </div>
+      </div>
+
+      <!-- Hotkey bar -->
+      <div id="hotkey-bar"></div>
+
+      <!-- Text input -->
+      <div id="input-row">
+        <input type="text" id="cmd-input" placeholder="Type command..." autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button id="btn-send">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
