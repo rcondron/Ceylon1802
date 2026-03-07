@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "build:server": "tsc -p tsconfig.server.json",
-    "build:client": "tsc -p tsconfig.client.json && cp -r client/public/* dist/client/",
+    "build:client": "node -e \"require('fs').cpSync('client/public','dist/client',{recursive:true})\"",
     "build": "npm run build:server && npm run build:client",
     "seed": "node dist/server/seed.js",
     "start": "node dist/server/index.js",
