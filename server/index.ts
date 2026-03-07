@@ -9,7 +9,7 @@ import { gameState, OnlinePlayer } from './engine/GameState';
 import { processCommand, creatureCombatTick, GameMessage } from './engine/commands';
 import { adminRouter } from './routes/admin';
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const PORT = parseInt(process.env.PORT || '3002', 10);
 
 // Initialize database
 initDatabase();
