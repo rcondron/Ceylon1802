@@ -62,10 +62,14 @@
 
   <!-- Game Screen -->
   <div id="screen-game" class="screen">
-    <!-- Top bar -->
+    <!-- Top bar: room title + description (tap to collapse) -->
     <div id="top-bar">
-      <div id="room-title">Ceylon 1802</div>
-      <div id="player-stats">
+      <div id="room-title-box" class="room-title-box">
+        <div id="room-title">Ceylon 1802</div>
+        <div id="room-description-text" class="room-description-text"></div>
+      </div>
+      <button type="button" id="btn-map" class="btn-map" title="Map" aria-label="Map">⊞</button>
+      <div id="player-stats" style="display:none">
         <span id="stat-hp" class="stat" title="Health">HP: --</span>
         <span id="stat-sp" class="stat" title="Stamina">SP: --</span>
         <span id="stat-level" class="stat" title="Level">Lv: --</span>
@@ -74,6 +78,15 @@
 
     <!-- Exit chips -->
     <div id="exits-bar"></div>
+
+    <!-- Map modal (full window) -->
+    <div id="map-modal" class="map-modal hidden">
+      <button type="button" id="map-modal-close" class="map-modal-close" aria-label="Close">×</button>
+      <div id="map-modal-title" class="map-modal-title"></div>
+      <div id="map-canvas-wrap" class="map-canvas-wrap">
+        <canvas id="map-canvas"></canvas>
+      </div>
+    </div>
 
     <!-- Main text output -->
     <div id="game-log"></div>
@@ -87,13 +100,11 @@
     <div id="bottom-controls">
       <!-- Quick action row -->
       <div id="action-row">
-        <button class="action-btn" data-cmd="look">Look</button>
         <button class="action-btn" data-cmd="inventory">Inv</button>
         <button class="action-btn" data-cmd="status">Status</button>
         <button class="action-btn" data-cmd="skills">Skills</button>
         <button class="action-btn" data-cmd="quests">Quests</button>
         <button class="action-btn" data-cmd="who">Who</button>
-        <button class="action-btn" data-cmd="map">Map</button>
         <button class="action-btn" data-cmd="help">Help</button>
       </div>
 
@@ -103,31 +114,6 @@
         <button class="action-btn combat" data-cmd="flee">Flee</button>
         <button class="action-btn" data-cmd="forage">Forage</button>
         <button class="action-btn" data-cmd="fish">Fish</button>
-      </div>
-
-      <!-- Directional pad -->
-      <div id="dpad">
-        <div class="dpad-row">
-          <button class="dir-btn" data-cmd="nw">NW</button>
-          <button class="dir-btn dir-main" data-cmd="n">N</button>
-          <button class="dir-btn" data-cmd="ne">NE</button>
-        </div>
-        <div class="dpad-row">
-          <button class="dir-btn dir-main" data-cmd="w">W</button>
-          <button class="dir-btn dir-center" data-cmd="look">Look</button>
-          <button class="dir-btn dir-main" data-cmd="e">E</button>
-        </div>
-        <div class="dpad-row">
-          <button class="dir-btn" data-cmd="sw">SW</button>
-          <button class="dir-btn dir-main" data-cmd="s">S</button>
-          <button class="dir-btn" data-cmd="se">SE</button>
-        </div>
-        <div class="dpad-row dpad-vertical">
-          <button class="dir-btn" data-cmd="u">Up</button>
-          <button class="dir-btn" data-cmd="d">Down</button>
-          <button class="dir-btn" data-cmd="in">In</button>
-          <button class="dir-btn" data-cmd="out">Out</button>
-        </div>
       </div>
 
       <!-- Hotkey bar -->

@@ -22,12 +22,53 @@ const DIR_ALIASES: Record<string, string> = {
   in: 'in', out: 'out',
 };
 
+// Ordinal parsing: "second sword" -> { ordinal: 2, rest: "sword" }, "3" -> { ordinal: 3, rest: "" }
+const ORDINAL_WORDS: Record<string, number> = {
+  first: 1, 1: 1, one: 1,
+  second: 2, 2: 2, two: 2,
+  third: 3, 3: 3, three: 3,
+  fourth: 4, 4: 4, four: 4,
+  fifth: 5, 5: 5, five: 5,
+  sixth: 6, 6: 6, six: 6,
+  seventh: 7, 7: 7, seven: 7,
+  eighth: 8, 8: 8, eight: 8,
+  ninth: 9, 9: 9, nine: 9,
+  tenth: 10, 10: 10, ten: 10,
+};
+function parseOrdinal(s: string): { ordinal: number | null; rest: string } {
+  const lower = s.trim().toLowerCase();
+  if (!lower) return { ordinal: null, rest: '' };
+  const words = lower.split(/\s+/);
+  const first = words[0];
+  if (ORDINAL_WORDS[first] != null) {
+    const rest = words.slice(1).join(' ').trim();
+    return { ordinal: ORDINAL_WORDS[first], rest };
+  }
+  if (/^\d+$/.test(first) && words.length >= 1) {
+    const n = parseInt(first, 10);
+    const rest = words.slice(1).join(' ').trim();
+    return { ordinal: n >= 1 ? n : null, rest };
+  }
+  return { ordinal: null, rest: lower };
+}
+function pickByOrdinal<T>(list: T[], nameMatch: (item: T) => boolean, ordinal: number | null): T | null {
+  const matches = list.filter(nameMatch);
+  if (matches.length === 0) return null;
+  const index = ordinal != null && ordinal >= 1 ? ordinal - 1 : 0;
+  if (index >= matches.length) return null;
+  return matches[index];
+}
+
 function getRoomData(roomId: string): any {
   return db.prepare('SELECT * FROM rooms WHERE id = ?').get(roomId);
 }
 
 function getRoomExits(roomId: string): any[] {
   return db.prepare('SELECT * FROM exits WHERE from_room_id = ?').all(roomId) as any[];
+}
+
+function getRoomGates(roomId: string): any[] {
+  return db.prepare('SELECT * FROM gates WHERE from_room_id = ?').all(roomId) as any[];
 }
 
 function getRoomNpcs(roomId: string): any[] {
@@ -38,37 +79,78 @@ function getCharacter(characterId: string): any {
   return db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
 }
 
-function formatRoom(room: any, exits: any[], npcs: any[], players: OnlinePlayer[], creatures: LiveCreature[], currentPlayerId: string): GameMessage {
+function getRoomGroundItems(roomId: string): { name: string; quantity: number }[] {
+  const rows = db.prepare(`
+    SELECT i.name, r.quantity FROM room_items r JOIN items i ON r.item_id = i.id WHERE r.room_id = ?
+  `).all(roomId) as any[];
+  return rows;
+}
+
+function formatRoom(room: any, exits: any[], gates: any[], npcs: any[], players: OnlinePlayer[], creatures: LiveCreature[], currentPlayerId: string): GameMessage {
   let text = `\n**${room.title}**\n`;
   text += `${room.description_long}\n`;
 
-  // Exits
+  // Exits (cardinal — within region)
   const exitDirs = exits.map(e => e.direction);
-  text += `\n*Exits: ${exitDirs.join(', ')}*\n`;
-
-  // NPCs
-  for (const npc of npcs) {
-    text += `\n  ${npc.name} (${npc.role}) is here.`;
+  if (exitDirs.length > 0) text += `\n*Exits: ${exitDirs.join(', ')}*\n`;
+  // Gates (cross-region: go forge, go door, go grove, etc.)
+  if (gates.length > 0) {
+    const gateLabels: string[] = [];
+    const doorGates: any[] = [];
+    for (const g of gates) {
+      const keywords = (g.keywords || '').split(',').map((k: string) => k.trim()).filter(Boolean);
+      if (keywords.includes('door')) doorGates.push(g);
+      const label = keywords.find((k: string) => k !== 'door' && k !== 'back' && k !== 'out') || keywords[0];
+      if (label) gateLabels.push(label);
+    }
+    let gateText = `*Doors: ${gateLabels.join(', ')}*`;
+    if (doorGates.length > 1) gateText += ` *(${doorGates.length} doors — go first door, go second door…)*`;
+    text += gateText + '\n';
   }
 
-  // Creatures
-  for (const c of creatures) {
-    text += `\n  A **${c.name}** is here.`;
-  }
-
-  // Other players
+  // Also here: NPCs, creatures, other players
   const otherPlayers = players.filter(p => p.characterId !== currentPlayerId);
-  for (const p of otherPlayers) {
-    text += `\n  **${p.characterName}** is here.`;
+  if (npcs.length > 0 || creatures.length > 0 || otherPlayers.length > 0) {
+    text += `\n*Also here:*\n`;
+    for (const npc of npcs) {
+      text += `  ${npc.name} (${npc.role})\n`;
+    }
+    for (const c of creatures) {
+      text += `  A **${c.name}**\n`;
+    }
+    for (const p of otherPlayers) {
+      text += `  **${p.characterName}**\n`;
+    }
   }
 
+  // Items on the ground
+  const groundItems = getRoomGroundItems(room.id);
+  if (groundItems.length > 0) {
+    text += `\n*Items:*\n`;
+    for (const it of groundItems) {
+      text += `  ${it.name}${it.quantity > 1 ? ` (x${it.quantity})` : ''}\n`;
+    }
+  }
+
+  const region = db.prepare('SELECT id, name FROM regions WHERE id = ?').get(room.region_id) as any;
   return {
     type: 'room',
     content: text,
     data: {
       roomId: room.id,
+      regionId: room.region_id || '',
+      regionName: region?.name || 'Unknown',
       title: room.title,
-      exits: exits.map(e => ({ direction: e.direction, hidden: !!e.hidden })).filter(e => !e.hidden),
+      description: room.description_long || '',
+      exits: exits.filter(e => !e.hidden).map(e => {
+        const toRoom = getRoomData(e.to_room_id);
+        return { direction: e.direction, to_room_id: e.to_room_id, to_title: toRoom?.title || '?' };
+      }),
+      gates: gates.map(g => ({
+        keywords: (g.keywords || '').split(',').map((k: string) => k.trim()).filter(Boolean),
+        to_room_id: g.to_room_id,
+        to_title: getRoomData(g.to_room_id)?.title || '?',
+      })),
       npcs: npcs.map(n => ({ id: n.id, name: n.name, role: n.role })),
       creatures: creatures.map(c => ({ instanceId: c.instanceId, name: c.name })),
       players: otherPlayers.map(p => ({ id: p.characterId, name: p.characterName })),
@@ -82,13 +164,60 @@ function cmdLook(player: OnlinePlayer, args: string[], send: SendFn, broadcast: 
   const room = getRoomData(player.roomId);
   if (!room) { send(player.characterId, { type: 'error', content: 'You are in a void. Something is wrong.' }); return; }
   const exits = getRoomExits(player.roomId);
+  const gates = getRoomGates(player.roomId);
   const npcs = getRoomNpcs(player.roomId);
   const players = gameState.getPlayersInRoom(player.roomId);
   const creatures = gameState.getCreaturesInRoom(player.roomId);
 
   if (args.length > 0) {
-    // Look at specific thing
     const target = args.join(' ').toLowerCase();
+
+    // Look at yourself
+    if (target === 'self' || target === 'me' || target === 'myself' || target === player.characterName.toLowerCase()) {
+      const char = getCharacter(player.characterId);
+      if (!char) return;
+      let text = `**${char.name}** — Level ${char.level} ${char.background || 'Newcomer'}\n`;
+      text += `Health: ${char.health}/${char.health_max}  |  Stamina: ${char.stamina}/${char.stamina_max}\n`;
+      const worn = getWornItems(player.characterId);
+      if (worn.length > 0) {
+        text += `\n**Wearing:** ${worn.map((w: any) => w.name).join(', ')}.\n`;
+      } else {
+        text += `\n**Wearing:** nothing.\n`;
+      }
+      const hands = getHands(player.characterId);
+      const held: string[] = [];
+      if (hands.right) held.push(hands.right.name);
+      if (hands.left) held.push(hands.left.name);
+      if (held.length > 0) {
+        text += `**Holding:** ${held.join(', ')}.\n`;
+      } else {
+        text += `**Holding:** nothing.\n`;
+      }
+      send(player.characterId, { type: 'status', content: text, data: { character: char } });
+      return;
+    }
+
+    // Check other players
+    const otherPlayer = players.find(p => p.characterId !== player.characterId && p.characterName.toLowerCase().includes(target));
+    if (otherPlayer) {
+      const oChar = getCharacter(otherPlayer.characterId);
+      if (oChar) {
+        let text = `**${oChar.name}** is a level ${oChar.level} ${oChar.background || 'adventurer'}.\n`;
+        const worn = getWornItems(otherPlayer.characterId);
+        if (worn.length > 0) {
+          text += `${oChar.name} is wearing: ${worn.map(w => w.name).join(', ')}.\n`;
+        }
+        const hands = getHands(otherPlayer.characterId);
+        const held: string[] = [];
+        if (hands.right) held.push(hands.right.name);
+        if (hands.left) held.push(hands.left.name);
+        if (held.length > 0) {
+          text += `${oChar.name} is holding: ${held.join(', ')}.\n`;
+        }
+        send(player.characterId, { type: 'text', content: text });
+        return;
+      }
+    }
 
     // Check NPCs
     const npc = npcs.find(n => n.name.toLowerCase().includes(target));
@@ -116,7 +245,64 @@ function cmdLook(player: OnlinePlayer, args: string[], send: SendFn, broadcast: 
     return;
   }
 
-  send(player.characterId, formatRoom(room, exits, npcs, players, creatures, player.characterId));
+  send(player.characterId, formatRoom(room, exits, gates, npcs, players, creatures, player.characterId));
+}
+
+// INTERACT command — go <object>, enter <object>, climb <object>, open <object>
+function cmdInteract(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn, verb: string): void {
+  if (args.length === 0) { send(player.characterId, { type: 'error', content: `${verb.charAt(0).toUpperCase() + verb.slice(1)} what?` }); return; }
+  const target = args.join(' ').toLowerCase();
+
+  const room = getRoomData(player.roomId);
+  if (!room) return;
+  const objects: any[] = JSON.parse(room.interactable_objects || '[]');
+  const obj = objects.find((o: any) => o.name?.toLowerCase().includes(target));
+
+  if (obj) {
+    if (obj.action === 'exit' && obj.to_room_id) {
+      const toRoom = getRoomData(obj.to_room_id);
+      if (toRoom) {
+        const oldRoomId = player.roomId;
+        broadcast(oldRoomId, { type: 'text', content: `**${player.characterName}** goes through the ${obj.name}.` }, player.characterId);
+        player.roomId = obj.to_room_id;
+        db.prepare('UPDATE characters SET room_id = ? WHERE id = ?').run(obj.to_room_id, player.characterId);
+        broadcast(obj.to_room_id, { type: 'text', content: `**${player.characterName}** enters.` }, player.characterId);
+        cmdLook(player, [], send, broadcast);
+        const spawned = checkRoomSpawns(player.roomId);
+        if (spawned) {
+          broadcast(player.roomId, { type: 'text', content: `A **${spawned.name}** enters.` });
+        }
+        return;
+      }
+    }
+    if (obj.locked) { send(player.characterId, { type: 'text', content: 'The door is locked.' }); return; }
+    if (obj.interact_text) { send(player.characterId, { type: 'text', content: obj.interact_text }); return; }
+  }
+
+  const climbables = ['tree', 'wall', 'cliff', 'rock', 'ladder', 'rope', 'vine'];
+  const doorLike = ['door', 'gate', 'entrance', 'archway', 'passage', 'hatch'];
+  const goables = ['shop', 'store', 'house', 'building', 'hut', 'shack', 'cabin', 'cave', 'bridge', 'path', 'road', 'trail', 'alley'];
+
+  if (verb === 'climb') {
+    if (climbables.some(c => target.includes(c))) {
+      send(player.characterId, { type: 'text', content: 'There are no branches low enough to reach.' });
+    } else {
+      send(player.characterId, { type: 'text', content: `You can't climb that.` });
+    }
+    return;
+  }
+
+  if (verb === 'open' || doorLike.some(d => target.includes(d))) {
+    send(player.characterId, { type: 'text', content: 'The door is locked.' });
+    return;
+  }
+
+  if (climbables.some(c => target.includes(c))) {
+    send(player.characterId, { type: 'text', content: `You'll need to climb that.` });
+    return;
+  }
+
+  send(player.characterId, { type: 'text', content: `You can't go there.` });
 }
 
 // MOVE command
@@ -129,47 +315,80 @@ function cmdMove(player: OnlinePlayer, args: string[], send: SendFn, broadcast: 
   const dirInput = args[0]?.toLowerCase();
   if (!dirInput) { send(player.characterId, { type: 'error', content: 'Go where?' }); return; }
 
+  // 1) Cardinal direction — exit within region
   const direction = DIR_ALIASES[dirInput] || dirInput;
   const exits = getRoomExits(player.roomId);
   const exit = exits.find(e => e.direction === direction);
 
-  if (!exit) {
-    send(player.characterId, { type: 'error', content: `You can't go ${direction}.` });
+  if (exit) {
+    const requiredFlags = JSON.parse(exit.required_flags || '[]');
+    if (requiredFlags.length > 0) {
+      const char = getCharacter(player.characterId);
+      const charFlags = JSON.parse(char?.flags || '[]');
+      for (const flag of requiredFlags) {
+        if (!charFlags.includes(flag)) {
+          send(player.characterId, { type: 'error', content: 'Something blocks your way.' });
+          return;
+        }
+      }
+    }
+    doMoveToRoom(player, exit.to_room_id, direction, send, broadcast);
     return;
   }
 
-  // Check required flags
-  const requiredFlags = JSON.parse(exit.required_flags || '[]');
-  if (requiredFlags.length > 0) {
-    const char = getCharacter(player.characterId);
-    const charFlags = JSON.parse(char?.flags || '[]');
-    for (const flag of requiredFlags) {
-      if (!charFlags.includes(flag)) {
-        send(player.characterId, { type: 'error', content: 'Something blocks your way.' });
+  // 2) Gate keyword — cross-region (e.g. go forge, go first door, go grove, go door)
+  const gatePhrase = args.join(' ').toLowerCase().trim();
+  if (gatePhrase) {
+    const gates = getRoomGates(player.roomId);
+
+    // Parse ordinal: "first door" -> ordinal 1, rest "door"; "second door" -> ordinal 2, rest "door"
+    const { ordinal, rest: basePhrase } = parseOrdinal(gatePhrase);
+    const searchPhrase = basePhrase || gatePhrase;
+
+    // Find all gates whose keywords match the search phrase
+    const matchingGates = gates.filter(g => {
+      const keywords = (g.keywords || '').split(',').map((k: string) => k.trim().toLowerCase()).filter(Boolean);
+      return keywords.some((k: string) => k === searchPhrase || searchPhrase.includes(k) || k.includes(searchPhrase));
+    });
+
+    // Also try exact full phrase (e.g. "first door" as a literal keyword)
+    if (matchingGates.length === 0) {
+      const exactGate = gates.find(g => {
+        const keywords = (g.keywords || '').split(',').map((k: string) => k.trim().toLowerCase()).filter(Boolean);
+        return keywords.some((k: string) => k === gatePhrase || gatePhrase.includes(k) || k.includes(gatePhrase));
+      });
+      if (exactGate) {
+        doMoveToRoom(player, exactGate.to_room_id, gatePhrase, send, broadcast);
         return;
       }
     }
+
+    if (matchingGates.length > 0) {
+      const idx = ordinal != null ? ordinal - 1 : 0;
+      const gate = matchingGates[idx];
+      if (gate) {
+        doMoveToRoom(player, gate.to_room_id, gatePhrase, send, broadcast);
+        return;
+      }
+      send(player.characterId, { type: 'error', content: `There is no ${gatePhrase} here.` });
+      return;
+    }
   }
 
+  cmdInteract(player, args, send, broadcast, 'go');
+}
+
+function doMoveToRoom(player: OnlinePlayer, toRoomId: string, label: string, send: SendFn, broadcast: BroadcastFn): void {
   const oldRoomId = player.roomId;
-  broadcast(oldRoomId, { type: 'text', content: `**${player.characterName}** leaves ${direction}.` }, player.characterId);
-
-  player.roomId = exit.to_room_id;
-  db.prepare('UPDATE characters SET room_id = ? WHERE id = ?').run(exit.to_room_id, player.characterId);
-
-  // Announce arrival
-  const opposites: Record<string, string> = {
-    north: 'south', south: 'north', east: 'west', west: 'east',
-    up: 'below', down: 'above', in: 'outside', out: 'inside',
-    northeast: 'southwest', northwest: 'southeast', southeast: 'northwest', southwest: 'northeast',
-  };
-  broadcast(exit.to_room_id, { type: 'text', content: `**${player.characterName}** arrives from the ${opposites[direction] || direction}.` }, player.characterId);
-
-  // Show new room
+  broadcast(oldRoomId, { type: 'text', content: `**${player.characterName}** leaves ${label}.` }, player.characterId);
+  player.roomId = toRoomId;
+  db.prepare('UPDATE characters SET room_id = ? WHERE id = ?').run(toRoomId, player.characterId);
+  broadcast(toRoomId, { type: 'text', content: `**${player.characterName}** enters.` }, player.characterId);
   cmdLook(player, [], send, broadcast);
-
-  // Check for spawns
-  checkRoomSpawns(player.roomId);
+  const spawned = checkRoomSpawns(player.roomId);
+  if (spawned) {
+    broadcast(player.roomId, { type: 'text', content: `A **${spawned.name}** enters.` });
+  }
 }
 
 // SAY command
@@ -182,18 +401,19 @@ function cmdSay(player: OnlinePlayer, args: string[], send: SendFn, broadcast: B
     .run('local', player.characterId, player.characterName, message, player.roomId);
 }
 
-// WHISPER command
+// WHISPER command — private message to a player in the same room
 function cmdWhisper(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
   if (args.length < 2) { send(player.characterId, { type: 'error', content: 'Usage: whisper <name> <message>' }); return; }
   const targetName = args[0];
   const message = args.slice(1).join(' ');
 
-  let targetPlayer: OnlinePlayer | undefined;
-  for (const p of gameState.players.values()) {
-    if (p.characterName.toLowerCase() === targetName.toLowerCase()) { targetPlayer = p; break; }
-  }
+  const inRoom = gameState.getPlayersInRoom(player.roomId);
+  const targetPlayer = inRoom.find(p => p.characterId !== player.characterId && p.characterName.toLowerCase() === targetName.toLowerCase());
 
-  if (!targetPlayer) { send(player.characterId, { type: 'error', content: `${targetName} is not online.` }); return; }
+  if (!targetPlayer) {
+    send(player.characterId, { type: 'error', content: `No one here named "${targetName}".` });
+    return;
+  }
 
   send(targetPlayer.characterId, { type: 'chat', content: `**${player.characterName}** whispers: "${message}"`, data: { channel: 'whisper' } });
   send(player.characterId, { type: 'chat', content: `You whisper to **${targetPlayer.characterName}**: "${message}"`, data: { channel: 'whisper' } });
@@ -214,13 +434,22 @@ function cmdInventory(player: OnlinePlayer, args: string[], send: SendFn, broadc
   }
 
   let text = '**Inventory:**\n';
-  const equipped = items.filter(i => i.equipped);
+  const hands = items.filter(i => i.equipped_slot === 'right_hand' || i.equipped_slot === 'left_hand');
+  const worn = items.filter(i => i.equipped && i.equipped_slot !== 'right_hand' && i.equipped_slot !== 'left_hand');
   const carried = items.filter(i => !i.equipped);
 
-  if (equipped.length > 0) {
-    text += '\n*Equipped:*\n';
-    for (const item of equipped) {
-      text += `  [${item.equipped_slot}] ${item.name}${item.quantity > 1 ? ` (x${item.quantity})` : ''}\n`;
+  if (hands.length > 0) {
+    text += '\n*Holding:*\n';
+    for (const item of hands) {
+      const label = item.equipped_slot === 'right_hand' ? 'Right hand' : 'Left hand';
+      text += `  [${label}] ${item.name}\n`;
+    }
+  }
+
+  if (worn.length > 0) {
+    text += '\n*Wearing:*\n';
+    for (const item of worn) {
+      text += `  [${item.equipped_slot}] ${item.name}\n`;
     }
   }
 
@@ -234,57 +463,189 @@ function cmdInventory(player: OnlinePlayer, args: string[], send: SendFn, broadc
   send(player.characterId, { type: 'inventory', content: text, data: { items } });
 }
 
-// GET command
-function cmdGet(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
-  // For now, only picking up from room resource nodes or dropped items would go here
-  send(player.characterId, { type: 'text', content: 'There is nothing to pick up here.' });
+function pickUpItem(player: OnlinePlayer, groundId: string, itemId: string, itemName: string, quantity: number, send: SendFn, broadcast: BroadcastFn): void {
+  const item = db.prepare('SELECT slot FROM items WHERE id = ?').get(itemId) as any;
+  db.prepare('DELETE FROM room_items WHERE id = ?').run(groundId);
+  if (item?.slot === 'hand') {
+    const hand = freeHand(player.characterId);
+    if (!hand) {
+      db.prepare('INSERT INTO inventory (id, character_id, item_id, quantity) VALUES (?, ?, ?, ?)')
+        .run(uuid(), player.characterId, itemId, quantity);
+      send(player.characterId, { type: 'text', content: `You pick up ${itemName} (your hands are full, it goes in your pack).` });
+    } else {
+      const invId = uuid();
+      db.prepare('INSERT INTO inventory (id, character_id, item_id, quantity, equipped, equipped_slot) VALUES (?, ?, ?, ?, 1, ?)')
+        .run(invId, player.characterId, itemId, quantity, hand);
+      const handLabel = hand === 'right_hand' ? 'right hand' : 'left hand';
+      send(player.characterId, { type: 'text', content: `You pick up ${itemName} in your ${handLabel}.` });
+    }
+  } else {
+    db.prepare('INSERT INTO inventory (id, character_id, item_id, quantity) VALUES (?, ?, ?, ?)')
+      .run(uuid(), player.characterId, itemId, quantity);
+    send(player.characterId, { type: 'text', content: `You pick up ${itemName}.` });
+  }
+  broadcast(player.roomId, { type: 'text', content: `**${player.characterName}** picks up ${itemName}.` }, player.characterId);
 }
 
-// DROP command
+// GET command
+function cmdGet(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
+  if (args.length === 0) { send(player.characterId, { type: 'error', content: 'Get what?' }); return; }
+  const raw = args.join(' ').toLowerCase();
+
+  // "get X from Y" — take from a container in inventory
+  const fromMatch = raw.match(/^(.+?)\s+from\s+(.+)$/);
+  if (fromMatch) {
+    const targetItem = fromMatch[1].trim();
+    const containerName = fromMatch[2].trim();
+    const container = db.prepare(`
+      SELECT inv.id FROM inventory inv JOIN items i ON inv.item_id = i.id
+      WHERE inv.character_id = ? AND lower(i.name) LIKE ? LIMIT 1
+    `).get(player.characterId, `%${containerName}%`) as any;
+    if (!container) { send(player.characterId, { type: 'error', content: `You don't have a "${fromMatch[2].trim()}".` }); return; }
+    const inside = db.prepare(`
+      SELECT inv.id, inv.item_id, inv.quantity, i.name, i.slot FROM inventory inv JOIN items i ON inv.item_id = i.id
+      WHERE inv.character_id = ? AND inv.container_id = ? AND lower(i.name) LIKE ? LIMIT 1
+    `).get(player.characterId, container.id, `%${targetItem}%`) as any;
+    if (!inside) { send(player.characterId, { type: 'error', content: `Nothing like that in your ${containerName}.` }); return; }
+    if (inside.slot === 'hand') {
+      const hand = freeHand(player.characterId);
+      if (hand) {
+        db.prepare('UPDATE inventory SET container_id = NULL, equipped = 1, equipped_slot = ? WHERE id = ?').run(hand, inside.id);
+        const handLabel = hand === 'right_hand' ? 'right hand' : 'left hand';
+        send(player.characterId, { type: 'text', content: `You take ${inside.name} from your ${containerName} into your ${handLabel}.` });
+      } else {
+        db.prepare('UPDATE inventory SET container_id = NULL WHERE id = ?').run(inside.id);
+        send(player.characterId, { type: 'text', content: `You take ${inside.name} from your ${containerName} (hands full, it goes in your pack).` });
+      }
+    } else {
+      db.prepare('UPDATE inventory SET container_id = NULL WHERE id = ?').run(inside.id);
+      send(player.characterId, { type: 'text', content: `You take ${inside.name} from your ${containerName}.` });
+    }
+    return;
+  }
+
+  if (raw === 'all') {
+    const all = db.prepare(`
+      SELECT r.id, r.item_id, r.quantity, i.name FROM room_items r JOIN items i ON r.item_id = i.id WHERE r.room_id = ?
+    `).all(player.roomId) as any[];
+    if (all.length === 0) {
+      send(player.characterId, { type: 'text', content: 'There is nothing to pick up here.' });
+      return;
+    }
+    for (const g of all) {
+      pickUpItem(player, g.id, g.item_id, g.name, g.quantity || 1, send, broadcast);
+    }
+    return;
+  }
+
+  const allGround = db.prepare(`
+    SELECT r.id, r.item_id, r.quantity, i.name FROM room_items r JOIN items i ON r.item_id = i.id
+    WHERE r.room_id = ?
+  `).all(player.roomId) as any[];
+  const { ordinal, rest } = parseOrdinal(raw);
+  const namePart = rest || raw.toLowerCase();
+  const ground = pickByOrdinal(allGround, r => r.name.toLowerCase().includes(namePart), ordinal);
+  if (!ground) {
+    send(player.characterId, { type: 'text', content: 'There is nothing like that here.' });
+    return;
+  }
+  pickUpItem(player, ground.id, ground.item_id, ground.name, ground.quantity || 1, send, broadcast);
+}
+
+// DROP command — drops from hands first, then pack. Supports ordinal: "drop second sword"
 function cmdDrop(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
   if (args.length === 0) { send(player.characterId, { type: 'error', content: 'Drop what?' }); return; }
-  const itemName = args.join(' ').toLowerCase();
-  const invItem = db.prepare(`
-    SELECT inv.id, i.name FROM inventory inv JOIN items i ON inv.item_id = i.id
-    WHERE inv.character_id = ? AND lower(i.name) LIKE ? AND inv.equipped = 0 LIMIT 1
-  `).get(player.characterId, `%${itemName}%`) as any;
+  const raw = args.join(' ').trim();
+  const { ordinal, rest } = parseOrdinal(raw);
+  const namePart = (rest || raw).toLowerCase();
+  const handItems = db.prepare(`
+    SELECT inv.id, inv.item_id, inv.quantity, inv.equipped_slot, i.name FROM inventory inv JOIN items i ON inv.item_id = i.id
+    WHERE inv.character_id = ? AND inv.equipped_slot IN ('right_hand','left_hand')
+  `).all(player.characterId) as any[];
+  const allInv = db.prepare(`
+    SELECT inv.id, inv.item_id, inv.quantity, i.name FROM inventory inv JOIN items i ON inv.item_id = i.id
+    WHERE inv.character_id = ?
+  `).all(player.characterId) as any[];
+  const invItem = pickByOrdinal(handItems, r => r.name.toLowerCase().includes(namePart), ordinal)
+    || pickByOrdinal(allInv, r => r.name.toLowerCase().includes(namePart), ordinal);
 
-  if (!invItem) { send(player.characterId, { type: 'error', content: `You don't have "${args.join(' ')}".` }); return; }
+  if (!invItem) { send(player.characterId, { type: 'error', content: `You don't have "${raw}".` }); return; }
   db.prepare('DELETE FROM inventory WHERE id = ?').run(invItem.id);
+  db.prepare('INSERT INTO room_items (id, room_id, item_id, quantity) VALUES (?, ?, ?, ?)')
+    .run(uuid(), player.roomId, invItem.item_id, invItem.quantity || 1);
   send(player.characterId, { type: 'text', content: `You drop ${invItem.name}.` });
   broadcast(player.roomId, { type: 'text', content: `**${player.characterName}** drops ${invItem.name}.` }, player.characterId);
 }
 
-// EQUIP command
-function cmdEquip(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
-  if (args.length === 0) { send(player.characterId, { type: 'error', content: 'Equip what?' }); return; }
-  const itemName = args.join(' ').toLowerCase();
-  const invItem = db.prepare(`
-    SELECT inv.id, inv.item_id, i.name, i.slot FROM inventory inv JOIN items i ON inv.item_id = i.id
-    WHERE inv.character_id = ? AND lower(i.name) LIKE ? AND inv.equipped = 0 LIMIT 1
-  `).get(player.characterId, `%${itemName}%`) as any;
-
-  if (!invItem) { send(player.characterId, { type: 'error', content: `You don't have "${args.join(' ')}" to equip.` }); return; }
-  if (!invItem.slot) { send(player.characterId, { type: 'error', content: `${invItem.name} cannot be equipped.` }); return; }
-
-  // Unequip anything in that slot
-  db.prepare('UPDATE inventory SET equipped = 0, equipped_slot = NULL WHERE character_id = ? AND equipped_slot = ?')
-    .run(player.characterId, invItem.slot);
-
-  db.prepare('UPDATE inventory SET equipped = 1, equipped_slot = ? WHERE id = ?').run(invItem.slot, invItem.id);
-  send(player.characterId, { type: 'text', content: `You equip ${invItem.name} (${invItem.slot}).` });
+function getHands(characterId: string): { right: any; left: any } {
+  const right = db.prepare(`
+    SELECT inv.id, inv.item_id, i.name, i.slot, i.category FROM inventory inv JOIN items i ON inv.item_id = i.id
+    WHERE inv.character_id = ? AND inv.equipped = 1 AND inv.equipped_slot = 'right_hand' LIMIT 1
+  `).get(characterId) as any || null;
+  const left = db.prepare(`
+    SELECT inv.id, inv.item_id, i.name, i.slot, i.category FROM inventory inv JOIN items i ON inv.item_id = i.id
+    WHERE inv.character_id = ? AND inv.equipped = 1 AND inv.equipped_slot = 'left_hand' LIMIT 1
+  `).get(characterId) as any || null;
+  return { right, left };
 }
 
-// UNEQUIP command
+function getWornItems(characterId: string): any[] {
+  return db.prepare(`
+    SELECT inv.id, inv.equipped_slot, i.name, i.category FROM inventory inv JOIN items i ON inv.item_id = i.id
+    WHERE inv.character_id = ? AND inv.equipped = 1 AND inv.equipped_slot NOT IN ('right_hand','left_hand')
+    ORDER BY i.category
+  `).all(characterId) as any[];
+}
+
+function freeHand(characterId: string): string | null {
+  const hands = getHands(characterId);
+  if (!hands.right) return 'right_hand';
+  if (!hands.left) return 'left_hand';
+  return null;
+}
+
+// EQUIP command. Supports ordinal: "equip second sword"
+function cmdEquip(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
+  if (args.length === 0) { send(player.characterId, { type: 'error', content: 'Equip what?' }); return; }
+  const raw = args.join(' ').trim();
+  const { ordinal, rest } = parseOrdinal(raw);
+  const namePart = (rest || raw).toLowerCase();
+  const unequipped = db.prepare(`
+    SELECT inv.id, inv.item_id, i.name, i.slot, i.category FROM inventory inv JOIN items i ON inv.item_id = i.id
+    WHERE inv.character_id = ? AND inv.equipped = 0
+  `).all(player.characterId) as any[];
+  const invItem = pickByOrdinal(unequipped, r => r.name.toLowerCase().includes(namePart), ordinal);
+
+  if (!invItem) { send(player.characterId, { type: 'error', content: `You don't have "${raw}" to equip.` }); return; }
+  if (!invItem.slot) { send(player.characterId, { type: 'error', content: `${invItem.name} cannot be equipped.` }); return; }
+
+  if (invItem.slot === 'hand') {
+    const hand = freeHand(player.characterId);
+    if (!hand) { send(player.characterId, { type: 'error', content: 'Your hands are full. Drop something first.' }); return; }
+    db.prepare('UPDATE inventory SET equipped = 1, equipped_slot = ? WHERE id = ?').run(hand, invItem.id);
+    const handLabel = hand === 'right_hand' ? 'right hand' : 'left hand';
+    send(player.characterId, { type: 'text', content: `You hold ${invItem.name} in your ${handLabel}.` });
+  } else {
+    db.prepare('UPDATE inventory SET equipped = 0, equipped_slot = NULL WHERE character_id = ? AND equipped_slot = ?')
+      .run(player.characterId, invItem.slot);
+    db.prepare('UPDATE inventory SET equipped = 1, equipped_slot = ? WHERE id = ?').run(invItem.slot, invItem.id);
+    send(player.characterId, { type: 'text', content: `You equip ${invItem.name} (${invItem.slot}).` });
+  }
+}
+
+// UNEQUIP command. Supports ordinal: "unequip second sword"
 function cmdUnequip(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
   if (args.length === 0) { send(player.characterId, { type: 'error', content: 'Unequip what?' }); return; }
-  const itemName = args.join(' ').toLowerCase();
-  const invItem = db.prepare(`
+  const raw = args.join(' ').trim();
+  const { ordinal, rest } = parseOrdinal(raw);
+  const namePart = (rest || raw).toLowerCase();
+  const equipped = db.prepare(`
     SELECT inv.id, i.name FROM inventory inv JOIN items i ON inv.item_id = i.id
-    WHERE inv.character_id = ? AND lower(i.name) LIKE ? AND inv.equipped = 1 LIMIT 1
-  `).get(player.characterId, `%${itemName}%`) as any;
+    WHERE inv.character_id = ? AND inv.equipped = 1
+  `).all(player.characterId) as any[];
+  const invItem = pickByOrdinal(equipped, r => r.name.toLowerCase().includes(namePart), ordinal);
 
-  if (!invItem) { send(player.characterId, { type: 'error', content: `You don't have "${args.join(' ')}" equipped.` }); return; }
+  if (!invItem) { send(player.characterId, { type: 'error', content: `You don't have "${raw}" equipped.` }); return; }
   db.prepare('UPDATE inventory SET equipped = 0, equipped_slot = NULL WHERE id = ?').run(invItem.id);
   send(player.characterId, { type: 'text', content: `You unequip ${invItem.name}.` });
 }
@@ -328,6 +689,77 @@ function cmdSkills(player: OnlinePlayer, args: string[], send: SendFn, broadcast
   send(player.characterId, { type: 'skill', content: text });
 }
 
+// Say to NPC (when user types "NPC Name: message") — matches dialogue options by keyword, then shop, then greeting
+function cmdSayToNpc(player: OnlinePlayer, npc: any, message: string, send: SendFn): void {
+  const msg = message.toLowerCase().trim();
+  if (!msg) {
+    send(player.characterId, { type: 'error', content: 'Say what?' });
+    return;
+  }
+
+  const dialogueTree = JSON.parse(npc.dialogue_tree || '{}');
+  const options: { keyword: string; label?: string; response: string }[] = dialogueTree.options || [];
+
+  // "topics" or "help" → list keyword options the player can ask about
+  if (msg === 'topics' || msg === 'help') {
+    if (options.length === 0) {
+      send(player.characterId, { type: 'text', content: `**${npc.name}** has no particular topics to discuss.` });
+    } else {
+      const lines = options.map((o: any) => `  **${o.keyword}** — ${o.label || o.keyword}`).join('\n');
+      send(player.characterId, { type: 'text', content: `**${npc.name}** — topics you can ask about:\n\n${lines}\n\n*Say "${npc.name}: <keyword>" to ask (e.g. "${npc.name}: ${options[0].keyword}").*` });
+    }
+    return;
+  }
+
+  // Match dialogue option: message equals keyword or message contains keyword
+  for (const opt of options) {
+    const kw = (opt.keyword || '').toLowerCase().trim();
+    if (!kw) continue;
+    if (msg === kw || msg.includes(kw)) {
+      const reply = opt.response || `${npc.name} has nothing specific to say about that.`;
+      send(player.characterId, { type: 'text', content: `**${npc.name}** says: "${reply}"` });
+      return;
+    }
+  }
+
+  const shopInv = JSON.parse(npc.shop_inventory || '[]');
+  const hasShop = shopInv.length > 0;
+
+  if (hasShop && (msg.includes('sell') || msg.includes('buy') || msg.includes('price') || msg.includes('pay'))) {
+    const invItems = db.prepare(`
+      SELECT i.name, i.value FROM inventory inv JOIN items i ON inv.item_id = i.id
+      WHERE inv.character_id = ? AND inv.equipped = 0
+    `).all(player.characterId) as any[];
+    const sellPrices = invItems.map((i: any) => `${i.name} (${Math.max(1, Math.floor(i.value * 0.5))}c)`);
+    const reply = sellPrices.length > 0
+      ? `Yes, I'll give you: ${sellPrices.join(', ')}.`
+      : "You don't have anything I'm interested in.";
+    send(player.characterId, { type: 'text', content: `**${npc.name}** says: "${reply}"` });
+    return;
+  }
+
+  const greeting = dialogueTree.greeting || `${npc.name} nods. "What can I do for you?"`;
+  const hint = options.length > 0
+    ? `\n\n*You can ask about: ${options.map((o: any) => o.keyword).join(', ')}.*`
+    : '';
+  send(player.characterId, { type: 'text', content: `**${npc.name}** says: "${greeting}"${hint}` });
+}
+
+// Build numbered shop list for an NPC (index 1-based). Used for menu and buy-by-number.
+function getShopListForNpc(npc: any): { index: number; item: any; price: number; name: string }[] {
+  const shopInv = JSON.parse(npc.shop_inventory || '[]');
+  const list: { index: number; item: any; price: number; name: string }[] = [];
+  let index = 1;
+  for (const entry of shopInv) {
+    const item = db.prepare('SELECT * FROM items WHERE id = ?').get(entry.item_id) as any;
+    if (item) {
+      const price = entry.price != null ? entry.price : (item.value ?? 0);
+      list.push({ index: index++, item, price, name: item.name });
+    }
+  }
+  return list;
+}
+
 // TALK command
 function cmdTalk(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
   if (args.length === 0) { send(player.characterId, { type: 'error', content: 'Talk to whom?' }); return; }
@@ -354,7 +786,7 @@ function cmdTalk(player: OnlinePlayer, args: string[], send: SendFn, broadcast: 
   // Check if NPC has a shop
   const shopInventory = JSON.parse(npc.shop_inventory || '[]');
   if (shopInventory.length > 0) {
-    text += '\n*Type "buy <item>" or "sell <item>" to trade.*\n';
+    text += '\n*Type "menu" or "what are you selling" for a list. "buy <item or number>" to buy.*\n';
   }
 
   // Check if NPC has quests
@@ -375,64 +807,75 @@ function cmdTalk(player: OnlinePlayer, args: string[], send: SendFn, broadcast: 
   send(player.characterId, { type: 'text', content: text, data: { npcId: npc.id, npcName: npc.name } });
 }
 
-// BUY command
-function cmdBuy(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
+// BUY command (optional targetNpc: buy from that NPC only). Supports menu number ("buy 3") and ordinal+name ("buy second sword").
+function cmdBuy(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn, targetNpc?: any): void {
   if (args.length === 0) { send(player.characterId, { type: 'error', content: 'Buy what?' }); return; }
-  const itemName = args.join(' ').toLowerCase();
-  const npcs = getRoomNpcs(player.roomId);
+  const raw = args.join(' ').trim();
+  const npcs = targetNpc ? [targetNpc] : getRoomNpcs(player.roomId);
 
   for (const npc of npcs) {
-    const shopInv = JSON.parse(npc.shop_inventory || '[]');
-    if (shopInv.length === 0) continue;
+    const shopList = getShopListForNpc(npc);
+    if (shopList.length === 0) continue;
 
-    for (const shopEntry of shopInv) {
-      const item = db.prepare('SELECT * FROM items WHERE id = ?').get(shopEntry.item_id) as any;
-      if (!item || !item.name.toLowerCase().includes(itemName)) continue;
+    let entry: { index: number; item: any; price: number; name: string } | null = null;
+    const rawLower = raw.toLowerCase();
+    if (/^\d+$/.test(raw.trim())) {
+      const num = parseInt(raw.trim(), 10);
+      entry = shopList.find(e => e.index === num) || null;
+    } else {
+      const { ordinal, rest } = parseOrdinal(raw);
+      const namePart = rest || rawLower;
+      entry = pickByOrdinal(shopList, e => e.name.toLowerCase().includes(namePart), ordinal);
+    }
 
-      const price = shopEntry.price || item.value;
-      const char = getCharacter(player.characterId);
-      const totalCopper = char.currency_copper + char.currency_silver * 100 + char.currency_gold * 10000;
+    if (!entry) continue;
 
-      if (totalCopper < price) {
-        send(player.characterId, { type: 'error', content: `You can't afford ${item.name} (${price}c).` });
-        return;
-      }
+    const { item, price, name } = entry;
+    const char = getCharacter(player.characterId);
+    const totalCopper = char.currency_copper + char.currency_silver * 100 + char.currency_gold * 10000;
 
-      // Deduct cost
-      const remaining = totalCopper - price;
-      const gold = Math.floor(remaining / 10000);
-      const silver = Math.floor((remaining % 10000) / 100);
-      const copper = remaining % 100;
-      db.prepare('UPDATE characters SET currency_gold = ?, currency_silver = ?, currency_copper = ? WHERE id = ?')
-        .run(gold, silver, copper, player.characterId);
-
-      // Add item
-      db.prepare('INSERT INTO inventory (id, character_id, item_id, quantity) VALUES (?, ?, ?, 1)')
-        .run(uuid(), player.characterId, item.id);
-
-      send(player.characterId, { type: 'text', content: `You buy ${item.name} for ${price}c from ${npc.name}.` });
+    if (totalCopper < price) {
+      send(player.characterId, { type: 'error', content: `You can't afford ${name} (${price}c).` });
       return;
     }
+
+    const remaining = totalCopper - price;
+    const gold = Math.floor(remaining / 10000);
+    const silver = Math.floor((remaining % 10000) / 100);
+    const copper = remaining % 100;
+    db.prepare('UPDATE characters SET currency_gold = ?, currency_silver = ?, currency_copper = ? WHERE id = ?')
+      .run(gold, silver, copper, player.characterId);
+
+    db.prepare('INSERT INTO inventory (id, character_id, item_id, quantity) VALUES (?, ?, ?, 1)')
+      .run(uuid(), player.characterId, item.id);
+
+    send(player.characterId, { type: 'text', content: `You buy ${name} for ${price}c from ${npc.name}.` });
+    return;
   }
 
-  send(player.characterId, { type: 'error', content: `No one here sells "${args.join(' ')}".` });
+  send(player.characterId, { type: 'error', content: targetNpc ? `${targetNpc.name} doesn't sell "${raw}".` : `No one here sells "${raw}".` });
 }
 
-// SELL command
-function cmdSell(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
+// SELL command (optional targetNpc: sell to that NPC only). Supports ordinal: "sell second sword"
+function cmdSell(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn, targetNpc?: any): void {
   if (args.length === 0) { send(player.characterId, { type: 'error', content: 'Sell what?' }); return; }
-  const itemName = args.join(' ').toLowerCase();
+  const raw = args.join(' ').trim();
+  const { ordinal, rest } = parseOrdinal(raw);
+  const namePart = (rest || raw).toLowerCase();
 
   const npcs = getRoomNpcs(player.roomId);
-  const hasShop = npcs.some(n => JSON.parse(n.shop_inventory || '[]').length > 0);
-  if (!hasShop) { send(player.characterId, { type: 'error', content: 'There is no merchant here.' }); return; }
+  const npc = targetNpc || npcs.find((n: any) => JSON.parse(n.shop_inventory || '[]').length > 0);
+  if (!npc) { send(player.characterId, { type: 'error', content: 'There is no merchant here.' }); return; }
+  const hasShop = JSON.parse(npc.shop_inventory || '[]').length > 0;
+  if (!hasShop) { send(player.characterId, { type: 'error', content: targetNpc ? `${npc.name} is not a merchant.` : 'There is no merchant here.' }); return; }
 
-  const invItem = db.prepare(`
+  const unequipped = db.prepare(`
     SELECT inv.id, i.name, i.value FROM inventory inv JOIN items i ON inv.item_id = i.id
-    WHERE inv.character_id = ? AND lower(i.name) LIKE ? AND inv.equipped = 0 LIMIT 1
-  `).get(player.characterId, `%${itemName}%`) as any;
+    WHERE inv.character_id = ? AND inv.equipped = 0
+  `).all(player.characterId) as any[];
+  const invItem = pickByOrdinal(unequipped, r => r.name.toLowerCase().includes(namePart), ordinal);
 
-  if (!invItem) { send(player.characterId, { type: 'error', content: `You don't have "${args.join(' ')}" to sell.` }); return; }
+  if (!invItem) { send(player.characterId, { type: 'error', content: `You don't have "${raw}" to sell.` }); return; }
 
   const sellPrice = Math.max(1, Math.floor(invItem.value * 0.5));
   db.prepare('DELETE FROM inventory WHERE id = ?').run(invItem.id);
@@ -445,7 +888,14 @@ function cmdSell(player: OnlinePlayer, args: string[], send: SendFn, broadcast: 
   db.prepare('UPDATE characters SET currency_gold = ?, currency_silver = ?, currency_copper = ? WHERE id = ?')
     .run(gold, silver, copper, player.characterId);
 
-  send(player.characterId, { type: 'text', content: `You sell ${invItem.name} for ${sellPrice}c.` });
+  if (targetNpc) {
+    const g = Math.floor(sellPrice / 10000), s = Math.floor((sellPrice % 10000) / 100), c = sellPrice % 100;
+    const amountStr = [g ? `${g}g` : '', s ? `${s}s` : '', c ? `${c}c` : ''].filter(Boolean).join(' ') || '0c';
+    send(player.characterId, { type: 'text', content: `You receive ${amountStr} from **${npc.name}**.` });
+    send(player.characterId, { type: 'text', content: `**${npc.name}** says: "Thanks! These will make a tasty meal!"` });
+  } else {
+    send(player.characterId, { type: 'text', content: `You sell ${invItem.name} for ${sellPrice}c.` });
+  }
 }
 
 // ATTACK command
@@ -464,8 +914,10 @@ function cmdAttack(player: OnlinePlayer, args: string[], send: SendFn, broadcast
 
   let target: LiveCreature;
   if (args.length > 0) {
-    const targetName = args.join(' ').toLowerCase();
-    const found = creatures.find(c => c.name.toLowerCase().includes(targetName));
+    const raw = args.join(' ').trim();
+    const { ordinal, rest } = parseOrdinal(raw);
+    const namePart = rest || raw.toLowerCase();
+    const found = pickByOrdinal(creatures, c => c.name.toLowerCase().includes(namePart), ordinal);
     if (!found) { send(player.characterId, { type: 'error', content: `You don't see "${args.join(' ')}" here.` }); return; }
     target = found;
   } else {
@@ -498,7 +950,7 @@ function performAttack(player: OnlinePlayer, target: LiveCreature, send: SendFn,
   const char = getCharacter(player.characterId);
   const weapon = db.prepare(`
     SELECT i.* FROM inventory inv JOIN items i ON inv.item_id = i.id
-    WHERE inv.character_id = ? AND inv.equipped = 1 AND inv.equipped_slot = 'main_hand' LIMIT 1
+    WHERE inv.character_id = ? AND inv.equipped = 1 AND inv.equipped_slot IN ('right_hand','left_hand') AND i.category = 'weapon' LIMIT 1
   `).get(player.characterId) as any;
 
   const baseDamage = weapon ? JSON.parse(weapon.properties || '{}').damage || 5 : 3;
@@ -643,10 +1095,10 @@ function cmdAccept(player: OnlinePlayer, args: string[], send: SendFn, broadcast
       }
 
       if (existing) {
-        db.prepare('UPDATE character_quests SET state = ?, started_at = datetime("now") WHERE character_id = ? AND quest_id = ?')
+        db.prepare("UPDATE character_quests SET state = ?, started_at = datetime('now') WHERE character_id = ? AND quest_id = ?")
           .run('active', player.characterId, questId);
       } else {
-        db.prepare('INSERT INTO character_quests (character_id, quest_id, state, progress, started_at) VALUES (?, ?, ?, ?, datetime("now"))')
+        db.prepare("INSERT INTO character_quests (character_id, quest_id, state, progress, started_at) VALUES (?, ?, ?, ?, datetime('now'))")
           .run(player.characterId, questId, 'active', JSON.stringify({}));
       }
 
@@ -722,10 +1174,12 @@ function cmdHelp(player: OnlinePlayer, args: string[], send: SendFn, broadcast: 
   const text = `**Commands:**
 
 **Movement:** north/n, south/s, east/e, west/w, up/u, down/d, ne, nw, se, sw
+**Doors:** go <place>, go door, go first door, go second door…
+**Interact:** enter <place>, climb <object>, open <object>
 **Actions:** look [target], talk <npc>, buy <item>, sell <item>, forage, fish
 **Combat:** attack [target], flee, defend
 **Items:** inventory/inv, get <item>, drop <item>, equip <item>, unequip <item>
-**Social:** say <msg>, whisper <name> <msg>, party invite/leave/list, who
+**Social:** "message" or 'message' (say out loud), say <msg>, whisper <name> <msg>, party invite/leave/list, who
 **Info:** status, skills, quests, accept <quest>, help, map
 **Admin:** /admin (if authorized)`;
 
@@ -747,13 +1201,26 @@ function cmdMap(player: OnlinePlayer, args: string[], send: SendFn, broadcast: B
   const room = getRoomData(player.roomId);
   const region = db.prepare('SELECT * FROM regions WHERE id = ?').get(room?.region_id) as any;
   const exits = getRoomExits(player.roomId);
+  const gates = getRoomGates(player.roomId);
 
   let text = `**Map — ${region?.name || 'Unknown'}**\n\n`;
   text += `You are at: ${room?.title}\n`;
-  text += `Exits:\n`;
-  for (const exit of exits) {
-    const destRoom = getRoomData(exit.to_room_id);
-    text += `  ${exit.direction} → ${destRoom?.title || 'Unknown'}\n`;
+  if (exits.length > 0) {
+    text += `Exits:\n`;
+    for (const exit of exits) {
+      const destRoom = getRoomData(exit.to_room_id);
+      text += `  ${exit.direction} → ${destRoom?.title || 'Unknown'}\n`;
+    }
+  }
+  if (gates.length > 0) {
+    text += `Doors:\n`;
+    for (let i = 0; i < gates.length; i++) {
+      const gate = gates[i];
+      const destRoom = getRoomData(gate.to_room_id);
+      const keywords = (gate.keywords || '').split(',').map((k: string) => k.trim()).filter(Boolean);
+      const label = keywords.find((k: string) => k !== 'door' && k !== 'back' && k !== 'out') || keywords[0];
+      text += `  go ${label} → ${destRoom?.title || 'Unknown'}\n`;
+    }
   }
 
   send(player.characterId, { type: 'system', content: text });
@@ -811,13 +1278,15 @@ function cmdParty(player: OnlinePlayer, args: string[], send: SendFn, broadcast:
   }
 }
 
-// Skill XP helper
-function awardSkillXP(characterId: string, skillId: string, amount: number, send: SendFn): void {
+// Skill XP helper (skillId can be GUID or skill_key)
+function awardSkillXP(characterId: string, skillIdOrKey: string, amount: number, send: SendFn): void {
+  let skillId = skillIdOrKey;
+  const byKey = db.prepare('SELECT id FROM skills WHERE skill_key = ?').get(skillIdOrKey) as any;
+  if (byKey) skillId = byKey.id;
   const existing = db.prepare('SELECT * FROM character_skills WHERE character_id = ? AND skill_id = ?')
     .get(characterId, skillId) as any;
 
   if (!existing) {
-    // Check if skill exists
     const skill = db.prepare('SELECT * FROM skills WHERE id = ?').get(skillId) as any;
     if (!skill) return;
     db.prepare('INSERT INTO character_skills (character_id, skill_id, level, experience) VALUES (?, ?, 1, ?)')
@@ -869,7 +1338,7 @@ function checkQuestProgress(characterId: string, actionType: string, targetId: s
 
           if (allDone) {
             const rewards = JSON.parse(cq.rewards || '{}');
-            db.prepare('UPDATE character_quests SET state = ?, progress = ?, completed_at = datetime("now") WHERE character_id = ? AND quest_id = ?')
+            db.prepare("UPDATE character_quests SET state = ?, progress = ?, completed_at = datetime('now') WHERE character_id = ? AND quest_id = ?")
               .run('completed', JSON.stringify(progress), characterId, cq.quest_id);
 
             send(characterId, { type: 'quest', content: `**Quest Complete: ${cq.quest_name}!**` });
@@ -903,27 +1372,29 @@ function checkQuestProgress(characterId: string, actionType: string, targetId: s
   }
 }
 
-// Room spawn checker
-function checkRoomSpawns(roomId: string): void {
+// Room spawn checker — returns the spawned creature if any, so caller can broadcast "enters"
+function checkRoomSpawns(roomId: string): LiveCreature | null {
   const room = getRoomData(roomId);
-  if (!room?.spawn_table_id) return;
+  if (!room?.spawn_table_id) return null;
 
   const existing = gameState.getCreaturesInRoom(roomId);
   const table = db.prepare('SELECT * FROM spawn_tables WHERE id = ?').get(room.spawn_table_id) as any;
-  if (!table) return;
+  if (!table) return null;
 
   const entries = JSON.parse(table.entries || '[]');
-  if (existing.length >= table.max_concurrent) return;
+  if (existing.length >= table.max_concurrent) return null;
 
   const lastSpawn = gameState.roomSpawnTimers.get(roomId) || 0;
-  if (Date.now() - lastSpawn < table.respawn_seconds * 1000) return;
+  if (Date.now() - lastSpawn < table.respawn_seconds * 1000) return null;
 
   // Spawn one random creature
   const entry = entries[Math.floor(Math.random() * entries.length)];
   if (entry) {
-    gameState.spawnCreature(entry.creature_id, roomId);
+    const spawned = gameState.spawnCreature(entry.creature_id, roomId);
     gameState.roomSpawnTimers.set(roomId, Date.now());
+    return spawned;
   }
+  return null;
 }
 
 // Creature AI tick — called periodically
@@ -1013,6 +1484,9 @@ const COMMANDS: Record<string, CommandHandler> = {
   buy: cmdBuy, purchase: cmdBuy,
   sell: cmdSell,
   attack: cmdAttack, kill: cmdAttack, hit: cmdAttack, k: cmdAttack,
+  climb: (p, a, s, b) => cmdInteract(p, a, s, b, 'climb'),
+  enter: (p, a, s, b) => cmdInteract(p, a, s, b, 'enter'),
+  open: (p, a, s, b) => cmdInteract(p, a, s, b, 'open'),
   flee: cmdFlee, run: cmdFlee,
   quests: cmdQuests, quest: cmdQuests,
   accept: cmdAccept,
@@ -1036,6 +1510,53 @@ COMMANDS['move'] = cmdMove;
 export function processCommand(input: string, player: OnlinePlayer, send: SendFn, broadcast: BroadcastFn): void {
   const trimmed = input.trim();
   if (!trimmed) return;
+
+  // Say out loud: "message" or 'message' — broadcast to room
+  const first = trimmed[0];
+  if (first === '"' || first === "'") {
+    const closeIdx = trimmed.indexOf(first, 1);
+    const message = closeIdx > 0 ? trimmed.slice(1, closeIdx) : trimmed.slice(1);
+    if (message.length > 0) {
+      cmdSay(player, [message], send, broadcast);
+    } else {
+      send(player.characterId, { type: 'error', content: 'Say what?' });
+    }
+    return;
+  }
+
+  // "NPC Name: rest" — directed at NPC (from clicking NPC bubble)
+  const npcs = getRoomNpcs(player.roomId);
+  const sortedNpcs = [...npcs].sort((a, b) => (b.name.length - a.name.length));
+  for (const npc of sortedNpcs) {
+    const prefix = npc.name + ': ';
+    if (trimmed.length >= prefix.length && trimmed.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase()) {
+      const rest = trimmed.slice(prefix.length).trim();
+      if (!rest) { send(player.characterId, { type: 'error', content: 'Say what?' }); return; }
+      if (rest.toLowerCase().startsWith('sell ')) {
+        cmdSell(player, rest.slice(5).trim().split(/\s+/), send, broadcast, npc);
+        return;
+      }
+      if (rest.toLowerCase().startsWith('buy ')) {
+        cmdBuy(player, rest.slice(4).trim().split(/\s+/), send, broadcast, npc);
+        return;
+      }
+      const restLower = rest.toLowerCase().trim();
+      const menuPhrases = ['menu', 'what are you selling', 'what do you sell', 'list', 'wares', 'goods', 'what do you have'];
+      const askingMenu = menuPhrases.some(p => restLower === p || restLower.startsWith(p + ' '));
+      if (askingMenu && JSON.parse(npc.shop_inventory || '[]').length > 0) {
+        const shopList = getShopListForNpc(npc);
+        if (shopList.length === 0) {
+          send(player.characterId, { type: 'text', content: `**${npc.name}** says: "I have nothing in stock at the moment."` });
+        } else {
+          let lines = shopList.map(e => `${e.index}. ${e.name} — ${e.price}c`).join('\n');
+          send(player.characterId, { type: 'text', content: `**${npc.name}** says: "Here's what I have."\n\n${lines}\n\n*Say "buy <number or item>" to purchase.*` });
+        }
+        return;
+      }
+      cmdSayToNpc(player, npc, rest, send);
+      return;
+    }
+  }
 
   const parts = trimmed.split(/\s+/);
   const cmd = parts[0].toLowerCase();

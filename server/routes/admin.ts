@@ -1,18 +1,53 @@
 import { Router, Request, Response } from 'express';
 import db from '../db';
 import { v4 as uuid } from 'uuid';
+import bcrypt from 'bcryptjs';
 
 export const adminRouter = Router();
 
-// Simple admin auth check (in production, use proper session/JWT)
-function requireAdmin(req: Request, res: Response, next: Function): void {
-  const accountId = req.headers['x-account-id'] as string;
-  if (!accountId) { res.status(401).json({ error: 'Not authenticated' }); return; }
+const DEFAULT_ADMIN_PASS = 'Test123';
 
-  const account = db.prepare('SELECT is_admin FROM accounts WHERE id = ?').get(accountId) as any;
-  if (!account?.is_admin) { res.status(403).json({ error: 'Not authorized' }); return; }
+function getAdminPasswordHash(): string {
+  const row = db.prepare("SELECT value FROM admin_settings WHERE key = 'admin_password_hash'").get() as any;
+  if (row) return row.value;
+  const hash = bcrypt.hashSync(DEFAULT_ADMIN_PASS, 10);
+  db.prepare("INSERT OR REPLACE INTO admin_settings (key, value) VALUES ('admin_password_hash', ?)").run(hash);
+  return hash;
+}
+
+// Standalone admin login (not tied to game accounts)
+adminRouter.post('/login', (req: Request, res: Response) => {
+  const { password } = req.body;
+  if (!password) { res.status(400).json({ error: 'Password required' }); return; }
+  const hash = getAdminPasswordHash();
+  if (!bcrypt.compareSync(password, hash)) {
+    res.status(401).json({ error: 'Invalid password' });
+    return;
+  }
+  const token = uuid();
+  db.prepare("INSERT OR REPLACE INTO admin_settings (key, value) VALUES ('admin_token', ?)").run(token);
+  res.json({ token });
+});
+
+function requireAdmin(req: Request, res: Response, next: Function): void {
+  const token = req.headers['x-admin-token'] as string;
+  if (!token) { res.status(401).json({ error: 'Not authenticated' }); return; }
+  const stored = db.prepare("SELECT value FROM admin_settings WHERE key = 'admin_token'").get() as any;
+  if (!stored || stored.value !== token) { res.status(403).json({ error: 'Invalid token' }); return; }
   next();
 }
+
+// Change admin password
+adminRouter.post('/change-password', requireAdmin, (req: Request, res: Response) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) { res.status(400).json({ error: 'Both current and new password required' }); return; }
+  if (newPassword.length < 4) { res.status(400).json({ error: 'New password must be at least 4 characters' }); return; }
+  const hash = getAdminPasswordHash();
+  if (!bcrypt.compareSync(currentPassword, hash)) { res.status(401).json({ error: 'Current password is incorrect' }); return; }
+  const newHash = bcrypt.hashSync(newPassword, 10);
+  db.prepare("INSERT OR REPLACE INTO admin_settings (key, value) VALUES ('admin_password_hash', ?)").run(newHash);
+  res.json({ success: true });
+});
 
 // --- Regions ---
 adminRouter.get('/regions', requireAdmin, (_req, res) => {
@@ -25,6 +60,11 @@ adminRouter.post('/regions', requireAdmin, (req, res) => {
   db.prepare('INSERT OR REPLACE INTO regions (id, name, description, level_range_min, level_range_max, tags) VALUES (?, ?, ?, ?, ?, ?)')
     .run(regionId, name, description || '', level_range_min || 1, level_range_max || 5, JSON.stringify(tags || []));
   res.json({ id: regionId });
+});
+
+adminRouter.delete('/regions/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM regions WHERE id = ?').run(req.params.id);
+  res.json({ deleted: true });
 });
 
 // --- Rooms ---
@@ -41,7 +81,8 @@ adminRouter.get('/rooms/:id', requireAdmin, (req, res) => {
   const room = db.prepare('SELECT * FROM rooms WHERE id = ?').get(req.params.id);
   if (!room) { res.status(404).json({ error: 'Room not found' }); return; }
   const exits = db.prepare('SELECT * FROM exits WHERE from_room_id = ?').all(req.params.id);
-  res.json({ ...room as any, exits });
+  const gates = db.prepare('SELECT * FROM gates WHERE from_room_id = ?').all(req.params.id);
+  res.json({ ...room as any, exits, gates });
 });
 
 adminRouter.post('/rooms', requireAdmin, (req, res) => {
@@ -68,11 +109,21 @@ adminRouter.post('/rooms', requireAdmin, (req, res) => {
     }
   }
 
+  // Handle gates
+  if (r.gates) {
+    db.prepare('DELETE FROM gates WHERE from_room_id = ?').run(roomId);
+    for (const gate of r.gates) {
+      db.prepare('INSERT INTO gates (from_room_id, to_room_id, keywords, description) VALUES (?, ?, ?, ?)')
+        .run(roomId, gate.to_room_id, gate.keywords || '', gate.description || null);
+    }
+  }
+
   res.json({ id: roomId });
 });
 
 adminRouter.delete('/rooms/:id', requireAdmin, (req, res) => {
   db.prepare('DELETE FROM exits WHERE from_room_id = ? OR to_room_id = ?').run(req.params.id, req.params.id);
+  db.prepare('DELETE FROM gates WHERE from_room_id = ? OR to_room_id = ?').run(req.params.id, req.params.id);
   db.prepare('DELETE FROM rooms WHERE id = ?').run(req.params.id);
   res.json({ deleted: true });
 });
@@ -85,10 +136,10 @@ adminRouter.get('/items', requireAdmin, (_req, res) => {
 adminRouter.post('/items', requireAdmin, (req, res) => {
   const i = req.body;
   const itemId = i.id || uuid();
-  db.prepare(`INSERT OR REPLACE INTO items (id, name, description, category, slot, weight, value,
+  db.prepare(`INSERT OR REPLACE INTO items (id, item_key, name, description, category, slot, weight, value,
     rarity, stackable, max_stack, durability_max, properties, tags, lore_text)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(itemId, i.name, i.description, i.category, i.slot || null, i.weight || 1,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(itemId, i.item_key || null, i.name, i.description, i.category, i.slot || null, i.weight || 1,
       i.value || 0, i.rarity || 'common', i.stackable ? 1 : 0, i.max_stack || 1,
       i.durability_max || 100, JSON.stringify(i.properties || {}), JSON.stringify(i.tags || []),
       i.lore_text || null);
@@ -164,8 +215,8 @@ adminRouter.get('/skills', requireAdmin, (_req, res) => {
 adminRouter.post('/skills', requireAdmin, (req, res) => {
   const s = req.body;
   const skillId = s.id || uuid();
-  db.prepare('INSERT OR REPLACE INTO skills (id, name, category, description, max_level) VALUES (?, ?, ?, ?, ?)')
-    .run(skillId, s.name, s.category, s.description || '', s.max_level || 100);
+  db.prepare('INSERT OR REPLACE INTO skills (id, skill_key, name, category, description, max_level) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(skillId, s.skill_key || null, s.name, s.category, s.description || '', s.max_level || 100);
   res.json({ id: skillId });
 });
 

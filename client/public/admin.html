@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ceylon 1802 — Admin</title>
   <style>
-    :root { --bg:#1a1a1a; --panel:#222; --text:#d4c9a8; --accent:#c49a3c; --border:#3a3a3a; --danger:#c44040; --success:#4a9a4a; }
+    :root { --bg:#1a1a1a; --panel:#222; --text:#d4c9a8; --accent:#c49a3c; --border:#3a3a3a; --danger:#c44040; --success:#4a9a4a; --info:#4a7a9a; }
     * { box-sizing:border-box; margin:0; padding:0; }
     body { background:var(--bg); color:var(--text); font-family:'Courier New',monospace; font-size:14px; }
     h1,h2,h3 { color:var(--accent); margin-bottom:12px; }
@@ -30,6 +30,7 @@
     .btn-save { background:var(--success); color:#fff; }
     .btn-new { background:var(--accent); color:#111; }
     .btn-delete { background:var(--danger); color:#fff; }
+    .btn-logout { background:var(--danger); color:#fff; float:right; }
     .btn:hover { opacity:0.85; }
     .row { display:flex; gap:12px; }
     .row > * { flex:1; }
@@ -41,20 +42,23 @@
     .msg-ok { background:#2a4a2a; color:var(--success); }
     .msg-err { background:#4a2a2a; color:var(--danger); }
     #login-panel { max-width:300px; margin:100px auto; text-align:center; }
+    .search-input { margin-bottom:8px; }
+    .region-rooms-list { list-style:none; margin:8px 0; }
+    .region-rooms-list a { color:var(--accent); text-decoration:none; }
+    .region-rooms-list a:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
   <div id="login-panel">
     <h2>Admin Login</h2>
-    <input type="text" id="admin-user" placeholder="Username">
-    <input type="password" id="admin-pass" placeholder="Password">
+    <input type="password" id="admin-pass" placeholder="Admin password">
     <button class="btn btn-save" id="btn-admin-login">Login</button>
     <div id="admin-login-err" class="msg msg-err" style="display:none;"></div>
   </div>
 
   <div id="admin-app" style="display:none;">
     <div class="container">
-      <h1>Ceylon 1802 — World Admin</h1>
+      <h1>Ceylon 1802 — World Admin <button class="btn btn-logout" id="btn-admin-logout">Logout</button></h1>
 
       <div class="tabs">
         <button class="tab active" data-tab="dashboard">Dashboard</button>
@@ -66,9 +70,9 @@
         <button class="tab" data-tab="quests">Quests</button>
         <button class="tab" data-tab="skills">Skills</button>
         <button class="tab" data-tab="players">Players</button>
+        <button class="tab" data-tab="settings">Settings</button>
       </div>
 
-      <!-- Dashboard -->
       <div class="tab-content active" id="tab-dashboard">
         <h2>World Overview</h2>
         <div class="stats-grid" id="stats-grid"></div>
@@ -76,100 +80,123 @@
         <div id="online-list"></div>
       </div>
 
-      <!-- Rooms -->
       <div class="tab-content" id="tab-rooms">
         <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-room">+ New Room</button></div>
         <div class="grid">
-          <div class="list-panel" id="room-list"></div>
-          <div class="form-panel" id="room-form"><p style="color:var(--text);opacity:0.5;">Select or create a room</p></div>
+          <div><input class="search-input" id="room-search" placeholder="Search rooms..."><div class="list-panel" id="room-list"></div></div>
+          <div class="form-panel" id="room-form"><p style="opacity:0.5;">Select or create a room</p></div>
         </div>
       </div>
 
-      <!-- Regions -->
       <div class="tab-content" id="tab-regions">
         <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-region">+ New Region</button></div>
         <div class="grid">
           <div class="list-panel" id="region-list"></div>
-          <div class="form-panel" id="region-form"><p style="color:var(--text);opacity:0.5;">Select or create a region</p></div>
+          <div class="form-panel" id="region-form"><p style="opacity:0.5;">Select or create a region</p></div>
         </div>
       </div>
 
-      <!-- Items -->
       <div class="tab-content" id="tab-items">
         <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-item">+ New Item</button></div>
         <div class="grid">
-          <div class="list-panel" id="item-list"></div>
-          <div class="form-panel" id="item-form"><p style="color:var(--text);opacity:0.5;">Select or create an item</p></div>
+          <div><select class="search-input" id="item-category" style="margin-bottom:8px;"><option value="">All categories</option><option value="weapon">weapon</option><option value="armor">armor</option><option value="food">food</option><option value="tool">tool</option><option value="resource">resource</option><option value="medicine">medicine</option><option value="misc">misc</option></select><input class="search-input" id="item-search" placeholder="Search items..."><div class="list-panel" id="item-list"></div></div>
+          <div class="form-panel" id="item-form"><p style="opacity:0.5;">Select or create an item</p></div>
         </div>
       </div>
 
-      <!-- NPCs -->
       <div class="tab-content" id="tab-npcs">
         <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-npc">+ New NPC</button></div>
         <div class="grid">
-          <div class="list-panel" id="npc-list"></div>
-          <div class="form-panel" id="npc-form"><p style="color:var(--text);opacity:0.5;">Select or create an NPC</p></div>
+          <div><input class="search-input" id="npc-search" placeholder="Search NPCs..."><div class="list-panel" id="npc-list"></div></div>
+          <div class="form-panel" id="npc-form"><p style="opacity:0.5;">Select or create an NPC</p></div>
         </div>
       </div>
 
-      <!-- Creatures -->
       <div class="tab-content" id="tab-creatures">
         <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-creature">+ New Creature</button></div>
         <div class="grid">
           <div class="list-panel" id="creature-list"></div>
-          <div class="form-panel" id="creature-form"><p style="color:var(--text);opacity:0.5;">Select or create a creature</p></div>
+          <div class="form-panel" id="creature-form"><p style="opacity:0.5;">Select or create a creature</p></div>
         </div>
       </div>
 
-      <!-- Quests -->
       <div class="tab-content" id="tab-quests">
         <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-quest">+ New Quest</button></div>
         <div class="grid">
           <div class="list-panel" id="quest-list"></div>
-          <div class="form-panel" id="quest-form"><p style="color:var(--text);opacity:0.5;">Select or create a quest</p></div>
+          <div class="form-panel" id="quest-form"><p style="opacity:0.5;">Select or create a quest</p></div>
         </div>
       </div>
 
-      <!-- Skills -->
       <div class="tab-content" id="tab-skills">
         <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-skill">+ New Skill</button></div>
         <div class="grid">
           <div class="list-panel" id="skill-list"></div>
-          <div class="form-panel" id="skill-form"><p style="color:var(--text);opacity:0.5;">Select or create a skill</p></div>
+          <div class="form-panel" id="skill-form"><p style="opacity:0.5;">Select or create a skill</p></div>
         </div>
       </div>
 
-      <!-- Players -->
       <div class="tab-content" id="tab-players">
         <h2>Player Management</h2>
-        <div class="list-panel" id="player-list" style="max-width:600px;"></div>
+        <input class="search-input" id="player-search" placeholder="Search players...">
+        <div class="list-panel" id="player-list" style="max-width:800px;"></div>
+      </div>
+
+      <div class="tab-content" id="tab-settings">
+        <h2>Admin Settings</h2>
+        <div class="form-panel" style="max-width:400px;">
+          <h3>Change Admin Password</h3>
+          <label>Current Password</label><input type="password" id="set-current-pass">
+          <label>New Password</label><input type="password" id="set-new-pass">
+          <label>Confirm New Password</label><input type="password" id="set-confirm-pass">
+          <div id="set-msg"></div>
+          <button class="btn btn-save" id="btn-change-pass">Update Password</button>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
   (function(){
-    let accountId = null;
-    const headers = () => ({ 'Content-Type':'application/json', 'X-Account-Id': accountId });
+    let adminToken = sessionStorage.getItem('adminToken') || null;
+    const headers = () => ({ 'Content-Type':'application/json', 'X-Admin-Token': adminToken });
 
-    // Login
+    function tryAutoLogin() {
+      if (adminToken) {
+        document.getElementById('login-panel').style.display = 'none';
+        document.getElementById('admin-app').style.display = 'block';
+        loadDashboard();
+      }
+    }
+    tryAutoLogin();
+
+    document.getElementById('admin-pass').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('btn-admin-login').click(); });
     document.getElementById('btn-admin-login').addEventListener('click', async () => {
-      const user = document.getElementById('admin-user').value;
       const pass = document.getElementById('admin-pass').value;
       try {
-        const res = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:user,password:pass}) });
+        const res = await fetch('/api/admin/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ password: pass }) });
         const data = await res.json();
-        if (!res.ok || !data.isAdmin) { showErr('Not authorized'); return; }
-        accountId = data.accountId;
+        if (!res.ok) { showErr(data.error || 'Login failed'); return; }
+        adminToken = data.token;
+        sessionStorage.setItem('adminToken', adminToken);
         document.getElementById('login-panel').style.display = 'none';
         document.getElementById('admin-app').style.display = 'block';
         loadDashboard();
       } catch(e) { showErr('Connection error'); }
     });
 
+    document.getElementById('btn-admin-logout').addEventListener('click', () => {
+      adminToken = null;
+      sessionStorage.removeItem('adminToken');
+      document.getElementById('admin-app').style.display = 'none';
+      document.getElementById('login-panel').style.display = '';
+      document.getElementById('admin-pass').value = '';
+    });
+
     function showErr(msg) {
       const el = document.getElementById('admin-login-err');
       el.textContent = msg; el.style.display = 'block';
+      setTimeout(() => el.style.display = 'none', 4000);
     }
 
     // Tabs
@@ -184,115 +211,200 @@
     });
 
     function loadTab(name) {
-      switch(name) {
-        case 'dashboard': loadDashboard(); break;
-        case 'rooms': loadRooms(); break;
-        case 'regions': loadRegions(); break;
-        case 'items': loadItems(); break;
-        case 'npcs': loadNpcs(); break;
-        case 'creatures': loadCreatures(); break;
-        case 'quests': loadQuests(); break;
-        case 'skills': loadSkills(); break;
-        case 'players': loadPlayers(); break;
-      }
+      const loaders = { dashboard:loadDashboard, rooms:loadRooms, regions:loadRegions, items:loadItems, npcs:loadNpcs, creatures:loadCreatures, quests:loadQuests, skills:loadSkills, players:loadPlayers };
+      if (loaders[name]) loaders[name]();
     }
 
     async function api(path, method='GET', body=null) {
       const opts = { method, headers: headers() };
       if (body) opts.body = JSON.stringify(body);
       const res = await fetch('/api/admin' + path, opts);
+      if (res.status === 401 || res.status === 403) {
+        adminToken = null; sessionStorage.removeItem('adminToken');
+        document.getElementById('admin-app').style.display = 'none';
+        document.getElementById('login-panel').style.display = '';
+        showErr('Session expired. Please login again.');
+        throw new Error('Unauthorized');
+      }
       return res.json();
-    }
-
-    // Dashboard
-    async function loadDashboard() {
-      const data = await api('/analytics');
-      const grid = document.getElementById('stats-grid');
-      grid.innerHTML = `
-        <div class="stat-card"><div class="stat-value">${data.totalRooms}</div><div class="stat-label">Rooms</div></div>
-        <div class="stat-card"><div class="stat-value">${data.totalNpcs}</div><div class="stat-label">NPCs</div></div>
-        <div class="stat-card"><div class="stat-value">${data.totalItems}</div><div class="stat-label">Items</div></div>
-        <div class="stat-card"><div class="stat-value">${data.totalQuests}</div><div class="stat-label">Quests</div></div>
-        <div class="stat-card"><div class="stat-value">${data.totalCharacters}</div><div class="stat-label">Characters</div></div>
-        <div class="stat-card"><div class="stat-value">${data.onlinePlayers.length}</div><div class="stat-label">Online Now</div></div>
-      `;
-      const ol = document.getElementById('online-list');
-      if (data.onlinePlayers.length === 0) { ol.innerHTML = '<p style="opacity:0.5;">No players online</p>'; }
-      else { ol.innerHTML = data.onlinePlayers.map(p => `<div class="list-item"><span class="list-item-title">${p.name}</span> <span class="list-item-sub">in ${p.roomId}</span></div>`).join(''); }
-    }
-
-    // Generic CRUD helpers
-    function renderList(panelId, items, titleKey, subKey) {
-      const el = document.getElementById(panelId);
-      el.innerHTML = items.map((item, i) =>
-        `<div class="list-item" data-index="${i}"><div class="list-item-title">${esc(item[titleKey]||item.id)}</div><div class="list-item-sub">${esc(String(item[subKey]||''))}</div></div>`
-      ).join('');
-      return items;
     }
 
     function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
+    // Dashboard
+    async function loadDashboard() {
+      const data = await api('/analytics');
+      document.getElementById('stats-grid').innerHTML = `
+        <div class="stat-card"><div class="stat-value">${data.totalAccounts||0}</div><div class="stat-label">Accounts</div></div>
+        <div class="stat-card"><div class="stat-value">${data.totalCharacters||0}</div><div class="stat-label">Characters</div></div>
+        <div class="stat-card"><div class="stat-value">${data.totalRooms||0}</div><div class="stat-label">Rooms</div></div>
+        <div class="stat-card"><div class="stat-value">${data.totalNpcs||0}</div><div class="stat-label">NPCs</div></div>
+        <div class="stat-card"><div class="stat-value">${data.totalItems||0}</div><div class="stat-label">Items</div></div>
+        <div class="stat-card"><div class="stat-value">${data.totalQuests||0}</div><div class="stat-label">Quests</div></div>
+        <div class="stat-card"><div class="stat-value">${(data.onlinePlayers||[]).length}</div><div class="stat-label">Online Now</div></div>
+      `;
+      const ol = document.getElementById('online-list');
+      if (!data.onlinePlayers?.length) ol.innerHTML = '<p style="opacity:0.5;">No players online</p>';
+      else ol.innerHTML = data.onlinePlayers.map(p => `<div class="list-item"><span class="list-item-title">${esc(p.name)}</span> <span class="list-item-sub">in ${esc(p.roomId)}</span></div>`).join('');
+    }
+
+    function renderList(panelId, items, titleKey, subKey, searchId) {
+      const el = document.getElementById(panelId);
+      const render = (filter) => {
+        const filtered = filter ? items.filter((it,i) => {
+          const t = (it[titleKey]||it.id||'').toLowerCase();
+          const s = (String(it[subKey]||'')).toLowerCase();
+          return t.includes(filter) || s.includes(filter);
+        }) : items;
+        el.innerHTML = filtered.map((item) => {
+          const idx = items.indexOf(item);
+          return `<div class="list-item" data-index="${idx}"><div class="list-item-title">${esc(item[titleKey]||item.id)}</div><div class="list-item-sub">${esc(String(item[subKey]||''))}</div></div>`;
+        }).join('');
+      };
+      render('');
+      if (searchId) {
+        const searchEl = document.getElementById(searchId);
+        if (searchEl) searchEl.oninput = () => render(searchEl.value.toLowerCase());
+      }
+      return { el, items, render };
+    }
+
     // ---- Rooms ----
     let roomsCache = [];
     async function loadRooms() {
+      if (!regionsCache.length) regionsCache = await api('/regions');
       roomsCache = await api('/rooms');
-      renderList('room-list', roomsCache, 'title', 'region_id');
-      document.querySelectorAll('#room-list .list-item').forEach(el => {
-        el.addEventListener('click', () => showRoomForm(roomsCache[el.dataset.index]));
-      });
+      const regionMap = {};
+      regionsCache.forEach(r => regionMap[r.id] = r.name);
+      const el = document.getElementById('room-list');
+      const searchEl = document.getElementById('room-search');
+      const render = (filter) => {
+        const filtered = filter ? roomsCache.filter(r => {
+          const t = (r.title||'').toLowerCase();
+          const rn = (regionMap[r.region_id]||'').toLowerCase();
+          return t.includes(filter) || rn.includes(filter);
+        }) : roomsCache;
+        el.innerHTML = filtered.map(r => {
+          const idx = roomsCache.indexOf(r);
+          return `<div class="list-item" data-index="${idx}"><div class="list-item-title">${esc(r.title||r.id)}</div><div class="list-item-sub">${esc(regionMap[r.region_id]||r.region_id)}</div></div>`;
+        }).join('');
+      };
+      render('');
+      searchEl.oninput = () => render(searchEl.value.toLowerCase());
+      el.onclick = e => { const li = e.target.closest('.list-item'); if(li) showRoomForm(roomsCache[li.dataset.index]); };
     }
     document.getElementById('btn-new-room').addEventListener('click', () => showRoomForm({}));
 
-    function showRoomForm(room) {
+    async function showRoomForm(room) {
+      if (!regionsCache.length) regionsCache = await api('/regions');
+      let exits = [], gates = [];
+      if (room.id) {
+        try {
+          const detail = await api('/rooms/' + room.id);
+          exits = detail.exits || [];
+          gates = detail.gates || [];
+        } catch(e) {}
+      }
+      const regionOptions = regionsCache.map(r => `<option value="${esc(r.id)}" ${r.id===room.region_id?'selected':''}>${esc(r.name)}</option>`).join('');
       const f = document.getElementById('room-form');
       f.innerHTML = `
         <h3>${room.id ? 'Edit' : 'New'} Room</h3>
         <label>ID</label><input id="rf-id" value="${room.id||''}" ${room.id?'readonly':''}>
-        <label>Region ID</label><input id="rf-region" value="${room.region_id||''}">
+        <label>Region</label><select id="rf-region"><option value="">-- select --</option>${regionOptions}</select>
         <label>Title</label><input id="rf-title" value="${esc(room.title||'')}">
         <label>Long Description</label><textarea id="rf-desc">${esc(room.description_long||'')}</textarea>
         <label>Short Description</label><input id="rf-short" value="${esc(room.description_short||'')}">
         <div class="row">
-          <div><label>Terrain</label><input id="rf-terrain" value="${room.terrain_type||'urban'}"></div>
-          <div><label>Safe Zone</label><select id="rf-safe"><option value="0" ${room.safe_zone?'':'selected'}>No</option><option value="1" ${room.safe_zone?'selected':''}>Yes</option></select></div>
-          <div><label>Light</label><input id="rf-light" value="${room.light_level||'bright'}"></div>
+          <div><label>Terrain</label><select id="rf-terrain"><option>urban</option><option>jungle</option><option>coast</option><option>plantation</option><option>cave</option><option>road</option></select></div>
+          <div><label>Safe Zone</label><select id="rf-safe"><option value="0">No</option><option value="1">Yes</option></select></div>
+        </div>
+        <div class="row">
+          <div><label>Light</label><select id="rf-light"><option>bright</option><option>dim</option><option>dark</option></select></div>
+          <div><label>Weather Exposure</label><select id="rf-weather"><option>sheltered</option><option>exposed</option></select></div>
         </div>
         <label>Spawn Table ID</label><input id="rf-spawn" value="${room.spawn_table_id||''}">
-        <label>Resource Nodes (JSON)</label><textarea id="rf-resources">${typeof room.resource_nodes==='string'?room.resource_nodes:JSON.stringify(room.resource_nodes||[],null,2)}</textarea>
         <label>Room Tags (JSON)</label><input id="rf-tags" value="${typeof room.room_tags==='string'?room.room_tags:JSON.stringify(room.room_tags||[])}">
         <label>Ambient Text (JSON)</label><textarea id="rf-ambient">${typeof room.ambient_text_pool==='string'?room.ambient_text_pool:JSON.stringify(room.ambient_text_pool||[],null,2)}</textarea>
         <label>Interactable Objects (JSON)</label><textarea id="rf-objects">${typeof room.interactable_objects==='string'?room.interactable_objects:JSON.stringify(room.interactable_objects||[],null,2)}</textarea>
-        <div id="rf-msg"></div>
-        <button class="btn btn-save" id="rf-save">Save Room</button>
-        ${room.id?'<button class="btn btn-delete" id="rf-del">Delete</button>':''}
+        <label>Resource Nodes (JSON)</label><textarea id="rf-resources">${typeof room.resource_nodes==='string'?room.resource_nodes:JSON.stringify(room.resource_nodes||[],null,2)}</textarea>
+
+        <h3 style="margin-top:16px;">Exits (cardinal, within region)</h3>
+        <div id="rf-exits"></div>
+        <button class="btn btn-new" id="rf-add-exit" type="button">+ Exit</button>
+
+        <h3 style="margin-top:16px;">Gates (cross-region, keyword)</h3>
+        <div id="rf-gates"></div>
+        <button class="btn btn-new" id="rf-add-gate" type="button">+ Gate</button>
+
+        <div id="rf-msg" style="margin-top:12px;"></div>
+        <div style="margin-top:12px;">
+          <button class="btn btn-save" id="rf-save">Save Room</button>
+          ${room.id?'<button class="btn btn-delete" id="rf-del">Delete</button>':''}
+        </div>
       `;
-      document.getElementById('rf-save').addEventListener('click', async () => {
-        try {
-          const body = {
-            id: document.getElementById('rf-id').value || undefined,
-            region_id: document.getElementById('rf-region').value,
-            title: document.getElementById('rf-title').value,
-            description_long: document.getElementById('rf-desc').value,
-            description_short: document.getElementById('rf-short').value,
-            terrain_type: document.getElementById('rf-terrain').value,
-            safe_zone: document.getElementById('rf-safe').value === '1',
-            light_level: document.getElementById('rf-light').value,
-            spawn_table_id: document.getElementById('rf-spawn').value || null,
-            resource_nodes: JSON.parse(document.getElementById('rf-resources').value || '[]'),
-            room_tags: JSON.parse(document.getElementById('rf-tags').value || '[]'),
-            ambient_text_pool: JSON.parse(document.getElementById('rf-ambient').value || '[]'),
-            interactable_objects: JSON.parse(document.getElementById('rf-objects').value || '[]'),
-          };
-          await api('/rooms', 'POST', body);
-          document.getElementById('rf-msg').innerHTML = '<div class="msg msg-ok">Saved!</div>';
-          loadRooms();
-        } catch(e) { document.getElementById('rf-msg').innerHTML = '<div class="msg msg-err">Error: '+e.message+'</div>'; }
-      });
-      if (room.id) {
-        document.getElementById('rf-del').addEventListener('click', async () => {
-          if (confirm('Delete this room?')) { await api('/rooms/'+room.id, 'DELETE'); loadRooms(); f.innerHTML='<p>Deleted</p>'; }
-        });
+      if(room.terrain_type) document.getElementById('rf-terrain').value = room.terrain_type;
+      if(room.safe_zone) document.getElementById('rf-safe').value = '1';
+      if(room.light_level) document.getElementById('rf-light').value = room.light_level;
+      if(room.weather_exposure) document.getElementById('rf-weather').value = room.weather_exposure;
+
+      const exitsDiv = document.getElementById('rf-exits');
+      const gatesDiv = document.getElementById('rf-gates');
+
+      function renderExits() {
+        exitsDiv.innerHTML = exits.map((ex, i) => `<div class="row" style="margin-bottom:6px;align-items:end;">
+          <div><label>Dir</label><input class="ex-dir" value="${esc(ex.direction||'')}" placeholder="north" style="width:80px;"></div>
+          <div><label>To Room ID</label><input class="ex-to" value="${esc(ex.to_room_id||'')}" placeholder="room uuid"></div>
+          <div><label>Desc</label><input class="ex-desc" value="${esc(ex.description||'')}"></div>
+          <div><button class="btn btn-delete ex-rm" data-i="${i}" type="button" style="margin-bottom:12px;">×</button></div>
+        </div>`).join('');
+        exitsDiv.querySelectorAll('.ex-rm').forEach(b => b.onclick = () => { exits.splice(+b.dataset.i,1); renderExits(); });
       }
+      function renderGates() {
+        gatesDiv.innerHTML = gates.map((g, i) => `<div class="row" style="margin-bottom:6px;align-items:end;">
+          <div><label>Keywords</label><input class="gt-kw" value="${esc(g.keywords||'')}" placeholder="forge, door, shop"></div>
+          <div><label>To Room ID</label><input class="gt-to" value="${esc(g.to_room_id||'')}" placeholder="room uuid"></div>
+          <div><label>Desc</label><input class="gt-desc" value="${esc(g.description||'')}"></div>
+          <div><button class="btn btn-delete gt-rm" data-i="${i}" type="button" style="margin-bottom:12px;">×</button></div>
+        </div>`).join('');
+        gatesDiv.querySelectorAll('.gt-rm').forEach(b => b.onclick = () => { gates.splice(+b.dataset.i,1); renderGates(); });
+      }
+      renderExits();
+      renderGates();
+      document.getElementById('rf-add-exit').onclick = () => { exits.push({direction:'',to_room_id:'',description:''}); renderExits(); };
+      document.getElementById('rf-add-gate').onclick = () => { gates.push({keywords:'',to_room_id:'',description:''}); renderGates(); };
+
+      document.getElementById('rf-save').addEventListener('click', async () => {
+        const exDirs = exitsDiv.querySelectorAll('.ex-dir');
+        const exTos = exitsDiv.querySelectorAll('.ex-to');
+        const exDescs = exitsDiv.querySelectorAll('.ex-desc');
+        const savedExits = [];
+        exDirs.forEach((el,i) => { if(el.value && exTos[i].value) savedExits.push({direction:el.value,to_room_id:exTos[i].value,description:exDescs[i].value}); });
+        const gtKws = gatesDiv.querySelectorAll('.gt-kw');
+        const gtTos = gatesDiv.querySelectorAll('.gt-to');
+        const gtDescs = gatesDiv.querySelectorAll('.gt-desc');
+        const savedGates = [];
+        gtKws.forEach((el,i) => { if(el.value && gtTos[i].value) savedGates.push({keywords:el.value,to_room_id:gtTos[i].value,description:gtDescs[i].value}); });
+        try {
+          await api('/rooms', 'POST', {
+            id:document.getElementById('rf-id').value||undefined, region_id:document.getElementById('rf-region').value,
+            title:document.getElementById('rf-title').value, description_long:document.getElementById('rf-desc').value,
+            description_short:document.getElementById('rf-short').value, terrain_type:document.getElementById('rf-terrain').value,
+            safe_zone:document.getElementById('rf-safe').value==='1', light_level:document.getElementById('rf-light').value,
+            weather_exposure:document.getElementById('rf-weather').value,
+            spawn_table_id:document.getElementById('rf-spawn').value||null,
+            resource_nodes:JSON.parse(document.getElementById('rf-resources').value||'[]'),
+            room_tags:JSON.parse(document.getElementById('rf-tags').value||'[]'),
+            ambient_text_pool:JSON.parse(document.getElementById('rf-ambient').value||'[]'),
+            interactable_objects:JSON.parse(document.getElementById('rf-objects').value||'[]'),
+            exits: savedExits,
+            gates: savedGates,
+          });
+          document.getElementById('rf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadRooms();
+        } catch(e) { if(e.message!=='Unauthorized') document.getElementById('rf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
+      });
+      if (room.id) document.getElementById('rf-del').addEventListener('click', async () => {
+        if(confirm('Delete this room?')){await api('/rooms/'+room.id,'DELETE');loadRooms();f.innerHTML='<p>Deleted</p>';}
+      });
     }
 
     // ---- Regions ----
@@ -300,38 +412,90 @@
     async function loadRegions() {
       regionsCache = await api('/regions');
       renderList('region-list', regionsCache, 'name', 'description');
-      document.querySelectorAll('#region-list .list-item').forEach(el => {
-        el.addEventListener('click', () => showRegionForm(regionsCache[el.dataset.index]));
+      document.getElementById('region-list').addEventListener('click', e => {
+        const li = e.target.closest('.list-item'); if (!li) return;
+        showRegionForm(regionsCache[li.dataset.index]);
       });
     }
     document.getElementById('btn-new-region').addEventListener('click', () => showRegionForm({}));
 
-    function showRegionForm(r) {
+    async function showRegionForm(r) {
       const f = document.getElementById('region-form');
+      let roomsSection = '';
+      if (r.id) {
+        const roomsInRegion = await api('/rooms?region_id=' + encodeURIComponent(r.id));
+        roomsSection = `
+          <label>Rooms in this region (${roomsInRegion.length})</label>
+          <ul class="region-rooms-list" id="region-rooms-list">
+            ${roomsInRegion.length ? roomsInRegion.map(room => `<li><a href="#" class="room-link" data-room-id="${esc(room.id)}">${esc(room.title || room.id)}</a></li>`).join('') : '<li style="opacity:0.6;">No rooms in this region</li>'}
+          </ul>
+        `;
+      }
+      const tagsVal = typeof r.tags === 'string' ? r.tags : JSON.stringify(r.tags || []);
       f.innerHTML = `
         <h3>${r.id?'Edit':'New'} Region</h3>
         <label>ID</label><input id="rgf-id" value="${r.id||''}" ${r.id?'readonly':''}>
         <label>Name</label><input id="rgf-name" value="${esc(r.name||'')}">
         <label>Description</label><textarea id="rgf-desc">${esc(r.description||'')}</textarea>
         <div class="row"><div><label>Level Min</label><input type="number" id="rgf-min" value="${r.level_range_min||1}"></div><div><label>Level Max</label><input type="number" id="rgf-max" value="${r.level_range_max||5}"></div></div>
+        <label>Tags (JSON)</label><input id="rgf-tags" value="${esc(tagsVal)}">
+        ${roomsSection}
         <div id="rgf-msg"></div>
         <button class="btn btn-save" id="rgf-save">Save</button>
+        ${r.id?'<button class="btn btn-delete" id="rgf-del">Delete</button>':''}
       `;
       document.getElementById('rgf-save').addEventListener('click', async () => {
-        await api('/regions','POST',{ id:document.getElementById('rgf-id').value||undefined, name:document.getElementById('rgf-name').value, description:document.getElementById('rgf-desc').value, level_range_min:+document.getElementById('rgf-min').value, level_range_max:+document.getElementById('rgf-max').value });
-        document.getElementById('rgf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadRegions();
+        try {
+          await api('/regions','POST',{id:document.getElementById('rgf-id').value||undefined,name:document.getElementById('rgf-name').value,description:document.getElementById('rgf-desc').value,level_range_min:+document.getElementById('rgf-min').value,level_range_max:+document.getElementById('rgf-max').value,tags:JSON.parse(document.getElementById('rgf-tags').value||'[]')});
+          document.getElementById('rgf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadRegions();
+        } catch(e) { if(e.message!=='Unauthorized') document.getElementById('rgf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
       });
+      if (r.id) {
+        document.getElementById('rgf-del').addEventListener('click', async () => {
+          if(confirm('Delete this region? Rooms in it will become orphaned.')){await api('/regions/'+r.id,'DELETE');loadRegions();f.innerHTML='<p>Deleted</p>';}
+        });
+      }
+      f.querySelectorAll('.room-link').forEach(a => {
+        a.addEventListener('click', (e) => { e.preventDefault(); goToRoomAndSelect(a.dataset.roomId); });
+      });
+    }
+
+    async function goToRoomAndSelect(roomId) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+      document.querySelector('.tab[data-tab="rooms"]').classList.add('active');
+      document.getElementById('tab-rooms').classList.add('active');
+      await loadRooms();
+      const room = roomsCache.find(ro => ro.id === roomId);
+      if (room) showRoomForm(room);
     }
 
     // ---- Items ----
     let itemsCache = [];
+    function renderItemList() {
+      const searchVal = (document.getElementById('item-search').value || '').toLowerCase();
+      const categoryVal = (document.getElementById('item-category').value || '').toLowerCase();
+      const filtered = itemsCache.filter(it => {
+        const matchCat = !categoryVal || (it.category || '').toLowerCase() === categoryVal;
+        const matchSearch = !searchVal || (it.name || '').toLowerCase().includes(searchVal) || (it.category || '').toLowerCase().includes(searchVal);
+        return matchCat && matchSearch;
+      });
+      const el = document.getElementById('item-list');
+      el.innerHTML = filtered.map(item => {
+        const idx = itemsCache.indexOf(item);
+        return `<div class="list-item" data-index="${idx}"><div class="list-item-title">${esc(item.name||item.id)}</div><div class="list-item-sub">${esc(String(item.category||''))}</div></div>`;
+      }).join('');
+    }
     async function loadItems() {
       itemsCache = await api('/items');
-      renderList('item-list', itemsCache, 'name', 'category');
-      document.querySelectorAll('#item-list .list-item').forEach(el => {
-        el.addEventListener('click', () => showItemForm(itemsCache[el.dataset.index]));
-      });
+      renderItemList();
+      document.getElementById('item-search').oninput = () => renderItemList();
+      document.getElementById('item-category').onchange = () => renderItemList();
     }
+    document.getElementById('item-list').addEventListener('click', e => {
+      const li = e.target.closest('.list-item'); if (!li) return;
+      showItemForm(itemsCache[li.dataset.index]);
+    });
     document.getElementById('btn-new-item').addEventListener('click', () => showItemForm({}));
 
     function showItemForm(item) {
@@ -343,7 +507,7 @@
         <label>Description</label><textarea id="if-desc">${esc(item.description||'')}</textarea>
         <div class="row">
           <div><label>Category</label><select id="if-cat"><option>weapon</option><option>armor</option><option>food</option><option>tool</option><option>resource</option><option>medicine</option><option>misc</option></select></div>
-          <div><label>Slot</label><input id="if-slot" value="${item.slot||''}"></div>
+          <div><label>Slot</label><input id="if-slot" value="${item.slot||''}" placeholder="hand, torso, head, feet..."></div>
         </div>
         <div class="row">
           <div><label>Weight</label><input type="number" step="0.1" id="if-weight" value="${item.weight||1}"></div>
@@ -361,9 +525,9 @@
         <div id="if-msg"></div>
         <button class="btn btn-save" id="if-save">Save</button>
       `;
-      if(item.category) document.getElementById('if-cat').value = item.category;
-      if(item.rarity) document.getElementById('if-rarity').value = item.rarity;
-      if(item.stackable) document.getElementById('if-stack').value = '1';
+      if(item.category) document.getElementById('if-cat').value=item.category;
+      if(item.rarity) document.getElementById('if-rarity').value=item.rarity;
+      if(item.stackable) document.getElementById('if-stack').value='1';
       document.getElementById('if-save').addEventListener('click', async () => {
         try {
           await api('/items','POST',{
@@ -376,7 +540,7 @@
             tags:JSON.parse(document.getElementById('if-tags').value||'[]'), lore_text:document.getElementById('if-lore').value||null
           });
           document.getElementById('if-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadItems();
-        } catch(e) { document.getElementById('if-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
+        } catch(e) { if(e.message!=='Unauthorized') document.getElementById('if-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
       });
     }
 
@@ -384,9 +548,10 @@
     let npcsCache = [];
     async function loadNpcs() {
       npcsCache = await api('/npcs');
-      renderList('npc-list', npcsCache, 'name', 'role');
-      document.querySelectorAll('#npc-list .list-item').forEach(el => {
-        el.addEventListener('click', () => showNpcForm(npcsCache[el.dataset.index]));
+      renderList('npc-list', npcsCache, 'name', 'role', 'npc-search');
+      document.getElementById('npc-list').addEventListener('click', e => {
+        const li = e.target.closest('.list-item'); if (!li) return;
+        showNpcForm(npcsCache[li.dataset.index]);
       });
     }
     document.getElementById('btn-new-npc').addEventListener('click', () => showNpcForm({}));
@@ -401,6 +566,7 @@
         <label>Description</label><textarea id="nf-desc">${esc(npc.description||'')}</textarea>
         <label>Speech Style</label><input id="nf-speech" value="${esc(npc.speech_style||'')}">
         <label>Backstory</label><textarea id="nf-backstory">${esc(npc.backstory||'')}</textarea>
+        <label>Personality Traits (JSON)</label><input id="nf-personality" value="${typeof npc.personality_traits==='string'?npc.personality_traits:JSON.stringify(npc.personality_traits||[])}">
         <label>Dialogue Tree (JSON)</label><textarea id="nf-dialogue" style="min-height:120px;">${typeof npc.dialogue_tree==='string'?npc.dialogue_tree:JSON.stringify(npc.dialogue_tree||{},null,2)}</textarea>
         <label>Shop Inventory (JSON)</label><textarea id="nf-shop">${typeof npc.shop_inventory==='string'?npc.shop_inventory:JSON.stringify(npc.shop_inventory||[],null,2)}</textarea>
         <label>Quest Links (JSON)</label><input id="nf-quests" value="${typeof npc.quest_links==='string'?npc.quest_links:JSON.stringify(npc.quest_links||[])}">
@@ -416,6 +582,7 @@
             role:document.getElementById('nf-role').value, room_id:document.getElementById('nf-room').value||null,
             description:document.getElementById('nf-desc').value, speech_style:document.getElementById('nf-speech').value,
             backstory:document.getElementById('nf-backstory').value,
+            personality_traits:JSON.parse(document.getElementById('nf-personality').value||'[]'),
             dialogue_tree:JSON.parse(document.getElementById('nf-dialogue').value||'{}'),
             shop_inventory:JSON.parse(document.getElementById('nf-shop').value||'[]'),
             quest_links:JSON.parse(document.getElementById('nf-quests').value||'[]'),
@@ -423,7 +590,7 @@
             knowledge_tags:JSON.parse(document.getElementById('nf-knowledge').value||'[]'),
           });
           document.getElementById('nf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadNpcs();
-        } catch(e) { document.getElementById('nf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
+        } catch(e) { if(e.message!=='Unauthorized') document.getElementById('nf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
       });
     }
 
@@ -432,8 +599,9 @@
     async function loadCreatures() {
       creaturesCache = await api('/creatures');
       renderList('creature-list', creaturesCache, 'name', 'level');
-      document.querySelectorAll('#creature-list .list-item').forEach(el => {
-        el.addEventListener('click', () => showCreatureForm(creaturesCache[el.dataset.index]));
+      document.getElementById('creature-list').addEventListener('click', e => {
+        const li = e.target.closest('.list-item'); if (!li) return;
+        showCreatureForm(creaturesCache[li.dataset.index]);
       });
     }
     document.getElementById('btn-new-creature').addEventListener('click', () => showCreatureForm({}));
@@ -447,14 +615,14 @@
         <label>Description</label><textarea id="cf-desc">${esc(c.description||'')}</textarea>
         <div class="row"><div><label>Level</label><input type="number" id="cf-level" value="${c.level||1}"></div><div><label>HP</label><input type="number" id="cf-hp" value="${c.health_max||20}"></div></div>
         <div class="row"><div><label>Atk Min</label><input type="number" id="cf-amin" value="${c.attack_min||2}"></div><div><label>Atk Max</label><input type="number" id="cf-amax" value="${c.attack_max||6}"></div><div><label>Defense</label><input type="number" id="cf-def" value="${c.defense||1}"></div></div>
-        <div class="row"><div><label>Accuracy</label><input type="number" id="cf-acc" value="${c.accuracy||60}"></div><div><label>Dodge</label><input type="number" id="cf-dodge" value="${c.dodge||10}"></div><div><label>Atk Speed (s)</label><input type="number" step="0.5" id="cf-spd" value="${c.attack_speed||3}"></div></div>
+        <div class="row"><div><label>Accuracy</label><input type="number" id="cf-acc" value="${c.accuracy||60}"></div><div><label>Dodge</label><input type="number" id="cf-dodge" value="${c.dodge||10}"></div><div><label>Atk Speed</label><input type="number" step="0.5" id="cf-spd" value="${c.attack_speed||3}"></div></div>
         <label>Behavior</label><select id="cf-behav"><option>aggressive</option><option>territorial</option><option>passive</option><option>ranged</option></select>
         <label>XP Reward</label><input type="number" id="cf-xp" value="${c.experience_reward||10}">
         <label>Loot Table (JSON)</label><textarea id="cf-loot">${typeof c.loot_table==='string'?c.loot_table:JSON.stringify(c.loot_table||[],null,2)}</textarea>
         <div id="cf-msg"></div>
         <button class="btn btn-save" id="cf-save">Save</button>
       `;
-      if(c.behavior) document.getElementById('cf-behav').value = c.behavior;
+      if(c.behavior) document.getElementById('cf-behav').value=c.behavior;
       document.getElementById('cf-save').addEventListener('click', async () => {
         try {
           await api('/creatures','POST',{
@@ -468,7 +636,7 @@
             loot_table:JSON.parse(document.getElementById('cf-loot').value||'[]'),
           });
           document.getElementById('cf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadCreatures();
-        } catch(e) { document.getElementById('cf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
+        } catch(e) { if(e.message!=='Unauthorized') document.getElementById('cf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
       });
     }
 
@@ -477,8 +645,9 @@
     async function loadQuests() {
       questsCache = await api('/quests');
       renderList('quest-list', questsCache, 'name', 'category');
-      document.querySelectorAll('#quest-list .list-item').forEach(el => {
-        el.addEventListener('click', () => showQuestForm(questsCache[el.dataset.index]));
+      document.getElementById('quest-list').addEventListener('click', e => {
+        const li = e.target.closest('.list-item'); if (!li) return;
+        showQuestForm(questsCache[li.dataset.index]);
       });
     }
     document.getElementById('btn-new-quest').addEventListener('click', () => showQuestForm({}));
@@ -497,7 +666,7 @@
         <div id="qf-msg"></div>
         <button class="btn btn-save" id="qf-save">Save</button>
       `;
-      if(q.repeatable) document.getElementById('qf-repeat').value = '1';
+      if(q.repeatable) document.getElementById('qf-repeat').value='1';
       document.getElementById('qf-save').addEventListener('click', async () => {
         try {
           await api('/quests','POST',{
@@ -509,7 +678,7 @@
             rewards:JSON.parse(document.getElementById('qf-rew').value||'{}'),
           });
           document.getElementById('qf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadQuests();
-        } catch(e) { document.getElementById('qf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
+        } catch(e) { if(e.message!=='Unauthorized') document.getElementById('qf-msg').innerHTML='<div class="msg msg-err">'+e.message+'</div>'; }
       });
     }
 
@@ -518,8 +687,9 @@
     async function loadSkills() {
       skillsCache = await api('/skills');
       renderList('skill-list', skillsCache, 'name', 'category');
-      document.querySelectorAll('#skill-list .list-item').forEach(el => {
-        el.addEventListener('click', () => showSkillForm(skillsCache[el.dataset.index]));
+      document.getElementById('skill-list').addEventListener('click', e => {
+        const li = e.target.closest('.list-item'); if (!li) return;
+        showSkillForm(skillsCache[li.dataset.index]);
       });
     }
     document.getElementById('btn-new-skill').addEventListener('click', () => showSkillForm({}));
@@ -536,7 +706,7 @@
         <button class="btn btn-save" id="sf-save">Save</button>
       `;
       document.getElementById('sf-save').addEventListener('click', async () => {
-        await api('/skills','POST',{ id:document.getElementById('sf-id').value||undefined, name:document.getElementById('sf-name').value, category:document.getElementById('sf-cat').value, description:document.getElementById('sf-desc').value });
+        await api('/skills','POST',{id:document.getElementById('sf-id').value||undefined,name:document.getElementById('sf-name').value,category:document.getElementById('sf-cat').value,description:document.getElementById('sf-desc').value});
         document.getElementById('sf-msg').innerHTML='<div class="msg msg-ok">Saved!</div>'; loadSkills();
       });
     }
@@ -545,10 +715,35 @@
     async function loadPlayers() {
       const players = await api('/players');
       const el = document.getElementById('player-list');
-      el.innerHTML = players.map(p =>
-        `<div class="list-item"><div class="list-item-title">${esc(p.name)} <span class="list-item-sub">(${esc(p.username)})</span></div><div class="list-item-sub">Level ${p.level} | Last active: ${p.last_active||'never'}</div></div>`
-      ).join('');
+      const searchEl = document.getElementById('player-search');
+      const render = (filter) => {
+        const filtered = filter ? players.filter(p => (p.name||'').toLowerCase().includes(filter)||(p.username||'').toLowerCase().includes(filter)) : players;
+        el.innerHTML = filtered.map(p =>
+          `<div class="list-item"><div class="list-item-title">${esc(p.name)} <span class="list-item-sub">(${esc(p.username)})</span></div><div class="list-item-sub">Level ${p.level} ${p.background||''} | Room: ${esc(p.room_id||'?')} | HP: ${p.health}/${p.health_max} | Last: ${p.last_active||'never'}</div></div>`
+        ).join('');
+      };
+      render('');
+      if (searchEl) searchEl.oninput = () => render(searchEl.value.toLowerCase());
     }
+
+    // ---- Settings ----
+    document.getElementById('btn-change-pass').addEventListener('click', async () => {
+      const current = document.getElementById('set-current-pass').value;
+      const newPass = document.getElementById('set-new-pass').value;
+      const confirm = document.getElementById('set-confirm-pass').value;
+      const msgEl = document.getElementById('set-msg');
+      if (!current || !newPass) { msgEl.innerHTML='<div class="msg msg-err">Fill in all fields</div>'; return; }
+      if (newPass !== confirm) { msgEl.innerHTML='<div class="msg msg-err">New passwords do not match</div>'; return; }
+      try {
+        const res = await fetch('/api/admin/change-password', { method:'POST', headers:headers(), body:JSON.stringify({ currentPassword:current, newPassword:newPass }) });
+        const data = await res.json();
+        if (!res.ok) { msgEl.innerHTML=`<div class="msg msg-err">${data.error||'Failed'}</div>`; return; }
+        msgEl.innerHTML='<div class="msg msg-ok">Password updated!</div>';
+        document.getElementById('set-current-pass').value='';
+        document.getElementById('set-new-pass').value='';
+        document.getElementById('set-confirm-pass').value='';
+      } catch(e) { msgEl.innerHTML='<div class="msg msg-err">Connection error</div>'; }
+    });
   })();
   </script>
 </body>

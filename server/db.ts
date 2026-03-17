@@ -39,7 +39,7 @@ export function initDatabase(): void {
       spawn_table_id TEXT
     );
 
-    -- Room exits
+    -- Room exits (cardinal directions: north, south, east, west — for movement within a region)
     CREATE TABLE IF NOT EXISTS exits (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       from_room_id TEXT NOT NULL REFERENCES rooms(id),
@@ -50,9 +50,19 @@ export function initDatabase(): void {
       hidden INTEGER DEFAULT 0
     );
 
-    -- Item templates
+    -- Gates (cross-region: go forge, go grove, go first door — keywords, not directions)
+    CREATE TABLE IF NOT EXISTS gates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_room_id TEXT NOT NULL REFERENCES rooms(id),
+      to_room_id TEXT NOT NULL REFERENCES rooms(id),
+      keywords TEXT NOT NULL,
+      description TEXT
+    );
+
+    -- Item templates (id is GUID; item_key is optional stable key for lookups e.g. starter items)
     CREATE TABLE IF NOT EXISTS items (
       id TEXT PRIMARY KEY,
+      item_key TEXT UNIQUE,
       name TEXT NOT NULL,
       description TEXT NOT NULL,
       category TEXT NOT NULL,
@@ -125,9 +135,18 @@ export function initDatabase(): void {
       properties TEXT DEFAULT '{}'
     );
 
-    -- Skill definitions
+    -- Items on the ground in a room (dropped or placed)
+    CREATE TABLE IF NOT EXISTS room_items (
+      id TEXT PRIMARY KEY,
+      room_id TEXT NOT NULL REFERENCES rooms(id),
+      item_id TEXT NOT NULL REFERENCES items(id),
+      quantity INTEGER DEFAULT 1
+    );
+
+    -- Skill definitions (id is GUID; skill_key is optional stable key for lookups e.g. starter skills)
     CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
+      skill_key TEXT UNIQUE,
       name TEXT NOT NULL,
       category TEXT NOT NULL,
       description TEXT,
@@ -266,6 +285,12 @@ export function initDatabase(): void {
       end_time TEXT
     );
 
+    -- Admin settings (key-value store)
+    CREATE TABLE IF NOT EXISTS admin_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     -- Admin audit log
     CREATE TABLE IF NOT EXISTS admin_audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -279,12 +304,34 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_rooms_region ON rooms(region_id);
     CREATE INDEX IF NOT EXISTS idx_exits_from ON exits(from_room_id);
     CREATE INDEX IF NOT EXISTS idx_exits_to ON exits(to_room_id);
+    CREATE INDEX IF NOT EXISTS idx_gates_from ON gates(from_room_id);
     CREATE INDEX IF NOT EXISTS idx_inventory_char ON inventory(character_id);
+    CREATE INDEX IF NOT EXISTS idx_room_items_room ON room_items(room_id);
     CREATE INDEX IF NOT EXISTS idx_npcs_room ON npcs(room_id);
     CREATE INDEX IF NOT EXISTS idx_char_skills ON character_skills(character_id);
     CREATE INDEX IF NOT EXISTS idx_char_quests ON character_quests(character_id);
     CREATE INDEX IF NOT EXISTS idx_chat_channel ON chat_log(channel, timestamp);
   `);
+
+  // Migration: add item_key / skill_key for existing DBs (no-op if columns already exist)
+  try { db.exec('ALTER TABLE items ADD COLUMN item_key TEXT'); } catch (_) {}
+  try { db.exec('ALTER TABLE skills ADD COLUMN skill_key TEXT'); } catch (_) {}
+  try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_items_item_key ON items(item_key) WHERE item_key IS NOT NULL'); } catch (_) {}
+  try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_skill_key ON skills(skill_key) WHERE skill_key IS NOT NULL'); } catch (_) {}
+
+  // Ensure all characters have a valid room_id (null or missing room -> default start room)
+  const startTagged = db.prepare("SELECT id FROM rooms WHERE room_tags LIKE ? LIMIT 1").get('%"start"%') as { id: string } | undefined;
+  const safeRoom = db.prepare('SELECT id FROM rooms WHERE safe_zone = 1 LIMIT 1').get() as { id: string } | undefined;
+  const firstRoom = db.prepare('SELECT id FROM rooms LIMIT 1').get() as { id: string } | undefined;
+  const defaultRoomId = startTagged?.id ?? safeRoom?.id ?? firstRoom?.id;
+  if (defaultRoomId) {
+    const updated = db.prepare(`
+      UPDATE characters SET room_id = ? WHERE room_id IS NULL OR room_id NOT IN (SELECT id FROM rooms)
+    `).run(defaultRoomId);
+    if (updated.changes > 0) {
+      console.log(`[db] Fixed ${updated.changes} character(s) with invalid room_id -> ${defaultRoomId}`);
+    }
+  }
 }
 
 export default db;

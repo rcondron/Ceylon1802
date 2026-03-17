@@ -1,7 +1,8 @@
 import express from 'express';
 import http from 'http';
-import { WebSocketServer, WebSocket } from 'ws';
+import fs from 'fs';
 import path from 'path';
+import { WebSocketServer, WebSocket } from 'ws';
 import { v4 as uuid } from 'uuid';
 import bcrypt from 'bcryptjs';
 import db, { initDatabase } from './db';
@@ -17,8 +18,38 @@ initDatabase();
 const app = express();
 app.use(express.json());
 
-// Serve static client files
-app.use(express.static(path.join(__dirname, '..', 'client')));
+// Static client: prefer client/public (dev), else dist/client (prod). Resolve from cwd so path is reliable.
+const cwd = process.cwd();
+const clientPublic = path.join(cwd, 'client', 'public');
+const distClient = path.join(cwd, 'dist', 'client');
+const staticDir = fs.existsSync(path.join(clientPublic, 'index.html'))
+  ? clientPublic
+  : fs.existsSync(path.join(distClient, 'index.html'))
+    ? distClient
+    : clientPublic; // fallback for edge cases
+app.use(express.static(staticDir));
+
+// Explicitly serve index.html at / and /index.html (avoids static path issues)
+const indexPath = path.join(staticDir, 'index.html');
+function sendIndex(_req: express.Request, res: express.Response): void {
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send('Not found: index.html missing. Static dir: ' + staticDir);
+  }
+}
+app.get('/', sendIndex);
+app.get('/index.html', sendIndex);
+
+// Serve admin page at /admin
+app.get('/admin', (_req, res) => {
+  const adminPath = path.join(staticDir, 'admin.html');
+  if (fs.existsSync(adminPath)) {
+    res.sendFile(adminPath);
+  } else {
+    res.status(404).send('Admin page not found');
+  }
+});
 
 // Admin API routes
 app.use('/api/admin', adminRouter);
@@ -49,7 +80,7 @@ app.post('/api/login', (req, res) => {
     return;
   }
 
-  db.prepare('UPDATE accounts SET last_login = datetime("now") WHERE id = ?').run(account.id);
+  db.prepare("UPDATE accounts SET last_login = datetime('now') WHERE id = ?").run(account.id);
   const characters = db.prepare('SELECT id, name, level, background FROM characters WHERE account_id = ?').all(account.id);
   res.json({ accountId: account.id, username: account.username, isAdmin: !!account.is_admin, characters });
 });
@@ -63,9 +94,11 @@ app.post('/api/characters', (req, res) => {
   const existing = db.prepare('SELECT id FROM characters WHERE name = ?').get(name);
   if (existing) { res.status(409).json({ error: 'Name taken' }); return; }
 
-  // Get starting room
+  // Get starting room (any room tagged "start", else first safe zone, else first room)
   const startRoom = db.prepare('SELECT id FROM rooms WHERE room_tags LIKE ? LIMIT 1').get('%"start"%') as any;
-  const roomId = startRoom?.id || db.prepare('SELECT id FROM rooms WHERE safe_zone = 1 LIMIT 1').get()?.toString() || 'harbor_dock';
+  const safeRoom = db.prepare('SELECT id FROM rooms WHERE safe_zone = 1 LIMIT 1').get() as any;
+  const firstRoom = db.prepare('SELECT id FROM rooms LIMIT 1').get() as any;
+  const roomId = startRoom?.id ?? safeRoom?.id ?? firstRoom?.id;
 
   const id = uuid();
   const bgStats: Record<string, Partial<Record<string, number>>> = {
@@ -80,6 +113,7 @@ app.post('/api/characters', (req, res) => {
   };
 
   const stats = bgStats[background || 'deckhand'] || bgStats.deckhand;
+  if (!roomId) throw new Error('No rooms in world — run seed first.');
   const charRoomId = typeof roomId === 'string' ? roomId : (roomId as any).id;
 
   db.prepare(`INSERT INTO characters (id, account_id, name, background, room_id,
@@ -90,32 +124,51 @@ app.post('/api/characters', (req, res) => {
     stats.intellect || 10, stats.perception || 10, stats.presence || 10, stats.willpower || 10
   );
 
-  // Give starting items based on background
-  const starterItems: Record<string, string[]> = {
-    deckhand: ['worn_cutlass', 'cotton_shirt', 'bread_loaf'],
-    ships_clerk: ['quill_knife', 'cotton_shirt', 'bread_loaf', 'ledger_book'],
-    traders_assistant: ['walking_stick', 'cotton_shirt', 'bread_loaf'],
-    runaway_apprentice: ['small_knife', 'cotton_shirt', 'bread_loaf'],
-    farmers_child: ['hatchet', 'cotton_shirt', 'bread_loaf'],
-    former_soldier: ['worn_cutlass', 'leather_vest', 'bread_loaf'],
-    temple_student: ['walking_stick', 'cotton_robe', 'bread_loaf'],
-    fishermans_kin: ['small_knife', 'cotton_shirt', 'bread_loaf', 'fishing_line'],
-  };
-
-  const items = starterItems[background || 'deckhand'] || starterItems.deckhand;
-  for (const itemId of items) {
-    const item = db.prepare('SELECT id FROM items WHERE id = ?').get(itemId);
-    if (item) {
-      db.prepare('INSERT INTO inventory (id, character_id, item_id) VALUES (?, ?, ?)').run(uuid(), id, itemId);
+  // Every character starts wearing: plain cotton shirt, brown leather pants, canvas sack, brown leather boots
+  const starterClothing = ['cotton_shirt', 'brown_leather_pants', 'canvas_sack', 'brown_leather_boots'];
+  for (const key of starterClothing) {
+    const item = db.prepare('SELECT id, slot FROM items WHERE item_key = ?').get(key) as any;
+    if (item && item.slot) {
+      const invId = uuid();
+      db.prepare('INSERT INTO inventory (id, character_id, item_id, equipped, equipped_slot) VALUES (?, ?, ?, 1, ?)').run(invId, id, item.id, item.slot);
     }
   }
 
-  // Give starting skills
-  const starterSkills = ['blades', 'defense', 'foraging'];
-  for (const skillId of starterSkills) {
-    const skill = db.prepare('SELECT id FROM skills WHERE id = ?').get(skillId);
+  // Give starting items based on background (weapons, extra gear, bread)
+  const starterItems: Record<string, string[]> = {
+    deckhand: ['worn_cutlass', 'bread_loaf'],
+    ships_clerk: ['quill_knife', 'bread_loaf', 'ledger_book'],
+    traders_assistant: ['walking_stick', 'bread_loaf'],
+    runaway_apprentice: ['small_knife', 'bread_loaf'],
+    farmers_child: ['hatchet', 'bread_loaf'],
+    former_soldier: ['worn_cutlass', 'leather_vest', 'bread_loaf'],
+    temple_student: ['walking_stick', 'cotton_robe', 'bread_loaf'],
+    fishermans_kin: ['small_knife', 'bread_loaf', 'fishing_line'],
+  };
+
+  const itemKeys = starterItems[background || 'deckhand'] || starterItems.deckhand;
+  for (const key of itemKeys) {
+    const item = db.prepare('SELECT id, slot, category FROM items WHERE item_key = ?').get(key) as any;
+    if (item) {
+      const invId = uuid();
+      if (item.slot === 'hand') {
+        const rightTaken = db.prepare("SELECT id FROM inventory WHERE character_id = ? AND equipped_slot = 'right_hand'").get(id);
+        const hand = rightTaken ? 'left_hand' : 'right_hand';
+        db.prepare('INSERT INTO inventory (id, character_id, item_id, equipped, equipped_slot) VALUES (?, ?, ?, 1, ?)').run(invId, id, item.id, hand);
+      } else if (item.slot) {
+        db.prepare('INSERT INTO inventory (id, character_id, item_id, equipped, equipped_slot) VALUES (?, ?, ?, 1, ?)').run(invId, id, item.id, item.slot);
+      } else {
+        db.prepare('INSERT INTO inventory (id, character_id, item_id) VALUES (?, ?, ?)').run(invId, id, item.id);
+      }
+    }
+  }
+
+  // Give starting skills (look up by skill_key)
+  const starterSkillKeys = ['blades', 'defense', 'foraging'];
+  for (const key of starterSkillKeys) {
+    const skill = db.prepare('SELECT id FROM skills WHERE skill_key = ?').get(key) as any;
     if (skill) {
-      db.prepare('INSERT INTO character_skills (character_id, skill_id, level, experience) VALUES (?, ?, 1, 0)').run(id, skillId);
+      db.prepare('INSERT INTO character_skills (character_id, skill_id, level, experience) VALUES (?, ?, 1, 0)').run(id, skill.id);
     }
   }
 
@@ -189,13 +242,13 @@ wss.on('connection', (ws: WebSocket) => {
       authenticated = true;
       playerCharId = characterId;
 
-      db.prepare('UPDATE characters SET last_active = datetime("now") WHERE id = ?').run(characterId);
+      db.prepare("UPDATE characters SET last_active = datetime('now') WHERE id = ?").run(characterId);
 
       // Welcome message
       sendToPlayer(characterId, { type: 'system', content: `Welcome back, **${char.name}**!` });
 
       // Announce to room
-      broadcastToRoom(char.room_id, { type: 'text', content: `**${char.name}** arrives.` }, characterId);
+      broadcastToRoom(char.room_id, { type: 'text', content: `**${char.name}** enters.` }, characterId);
 
       // Show room
       processCommand('look', player, sendToPlayer, broadcastToRoom);
@@ -245,7 +298,7 @@ setInterval(() => {
           if (entry) {
             const spawned = gameState.spawnCreature(entry.creature_id, player.roomId);
             if (spawned) {
-              broadcastToRoom(player.roomId, { type: 'text', content: `A **${spawned.name}** appears!` });
+              broadcastToRoom(player.roomId, { type: 'text', content: `A **${spawned.name}** enters.` });
             }
             gameState.roomSpawnTimers.set(player.roomId, Date.now());
           }
