@@ -273,20 +273,200 @@ adminRouter.get('/analytics', requireAdmin, (_req, res) => {
   });
 });
 
+// --- Accounts ---
+adminRouter.get('/accounts', requireAdmin, (_req, res) => {
+  const rows = db.prepare(`
+    SELECT a.id, a.email, a.created_at, a.last_login, a.is_admin, a.blocked, a.blocked_reason,
+           (SELECT COUNT(*) FROM characters c WHERE c.account_id = a.id) AS character_count,
+           (SELECT COUNT(*) FROM reports r WHERE r.target_account_id = a.id AND r.status = 'open') AS open_report_count
+    FROM accounts a ORDER BY a.created_at DESC
+  `).all();
+  res.json(rows);
+});
+
+adminRouter.post('/accounts', requireAdmin, (req, res) => {
+  const { email, password, is_admin } = req.body;
+  if (!email || !password) { res.status(400).json({ error: 'Email and password are required' }); return; }
+  if (password.length < 4) { res.status(400).json({ error: 'Password must be at least 4 characters' }); return; }
+  const existing = db.prepare('SELECT id FROM accounts WHERE email = ?').get(email.toLowerCase().trim());
+  if (existing) { res.status(409).json({ error: 'An account with this email already exists' }); return; }
+  const id = uuid();
+  const hash = bcrypt.hashSync(password, 10);
+  db.prepare('INSERT INTO accounts (id, email, password_hash, is_admin) VALUES (?, ?, ?, ?)').run(id, email.toLowerCase().trim(), hash, is_admin ? 1 : 0);
+  res.json({ id, email: email.toLowerCase().trim() });
+});
+
+adminRouter.delete('/accounts/:id', requireAdmin, (req, res) => {
+  const account = db.prepare('SELECT is_admin FROM accounts WHERE id = ?').get(req.params.id) as any;
+  if (!account) { res.status(404).json({ error: 'Account not found' }); return; }
+  if (account.is_admin) { res.status(403).json({ error: 'Admin accounts cannot be deleted' }); return; }
+  const chars = db.prepare('SELECT id FROM characters WHERE account_id = ?').all(req.params.id) as any[];
+  for (const c of chars) {
+    db.prepare('DELETE FROM inventory WHERE character_id = ?').run(c.id);
+    db.prepare('DELETE FROM character_skills WHERE character_id = ?').run(c.id);
+    db.prepare('DELETE FROM character_quests WHERE character_id = ?').run(c.id);
+  }
+  db.prepare('DELETE FROM characters WHERE account_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM accounts WHERE id = ?').run(req.params.id);
+  res.json({ deleted: true });
+});
+
+adminRouter.get('/accounts/:id/characters', requireAdmin, (req, res) => {
+  const chars = db.prepare('SELECT * FROM characters WHERE account_id = ? ORDER BY name').all(req.params.id);
+  res.json(chars);
+});
+
+adminRouter.post('/accounts/:id/characters', requireAdmin, (req, res) => {
+  const accountId = req.params.id;
+  const account = db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId);
+  if (!account) { res.status(404).json({ error: 'Account not found' }); return; }
+
+  const { name, background } = req.body;
+  if (!name) { res.status(400).json({ error: 'Name is required' }); return; }
+  if (name.length < 2 || name.length > 20) { res.status(400).json({ error: 'Name must be 2-20 characters' }); return; }
+  if (!/^[a-zA-Z]+$/.test(name)) { res.status(400).json({ error: 'Name: letters only' }); return; }
+
+  const existing = db.prepare('SELECT id FROM characters WHERE name = ?').get(name);
+  if (existing) { res.status(409).json({ error: 'Name already taken' }); return; }
+
+  const startRoom = db.prepare('SELECT id FROM rooms WHERE room_tags LIKE ? LIMIT 1').get('%"start"%') as any;
+  const safeRoom = db.prepare('SELECT id FROM rooms WHERE safe_zone = 1 LIMIT 1').get() as any;
+  const firstRoom = db.prepare('SELECT id FROM rooms LIMIT 1').get() as any;
+  const roomId = startRoom?.id ?? safeRoom?.id ?? firstRoom?.id;
+  if (!roomId) { res.status(500).json({ error: 'No rooms in world — run seed first' }); return; }
+
+  const bgStats: Record<string, Record<string, number>> = {
+    deckhand: { strength: 12, endurance: 12, agility: 11 },
+    ships_clerk: { intellect: 13, perception: 11, presence: 11 },
+    traders_assistant: { presence: 13, intellect: 11, perception: 11 },
+    runaway_apprentice: { agility: 13, perception: 12 },
+    farmers_child: { endurance: 13, strength: 12 },
+    former_soldier: { strength: 14, endurance: 12, willpower: 11 },
+    temple_student: { willpower: 13, intellect: 12, presence: 11 },
+    fishermans_kin: { perception: 13, agility: 11, endurance: 11 },
+  };
+  const stats = bgStats[background || 'deckhand'] || bgStats.deckhand;
+
+  const id = uuid();
+  db.prepare(`INSERT INTO characters (id, account_id, name, background, room_id,
+    strength, agility, endurance, intellect, perception, presence, willpower)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    id, accountId, name, background || 'deckhand', roomId,
+    stats.strength || 10, stats.agility || 10, stats.endurance || 10,
+    stats.intellect || 10, stats.perception || 10, stats.presence || 10, stats.willpower || 10
+  );
+
+  const starterClothing = ['cotton_shirt', 'brown_leather_pants', 'canvas_sack', 'brown_leather_boots'];
+  for (const key of starterClothing) {
+    const item = db.prepare('SELECT id, slot FROM items WHERE item_key = ?').get(key) as any;
+    if (item?.slot) {
+      db.prepare('INSERT INTO inventory (id, character_id, item_id, equipped, equipped_slot) VALUES (?, ?, ?, 1, ?)').run(uuid(), id, item.id, item.slot);
+    }
+  }
+
+  const starterItems: Record<string, string[]> = {
+    deckhand: ['worn_cutlass', 'bread_loaf'],
+    ships_clerk: ['quill_knife', 'bread_loaf', 'ledger_book'],
+    traders_assistant: ['walking_stick', 'bread_loaf'],
+    runaway_apprentice: ['small_knife', 'bread_loaf'],
+    farmers_child: ['hatchet', 'bread_loaf'],
+    former_soldier: ['worn_cutlass', 'leather_vest', 'bread_loaf'],
+    temple_student: ['walking_stick', 'cotton_robe', 'bread_loaf'],
+    fishermans_kin: ['small_knife', 'bread_loaf', 'fishing_line'],
+  };
+  const itemKeys = starterItems[background || 'deckhand'] || starterItems.deckhand;
+  for (const key of itemKeys) {
+    const item = db.prepare('SELECT id, slot, category FROM items WHERE item_key = ?').get(key) as any;
+    if (item) {
+      const invId = uuid();
+      if (item.slot === 'hand') {
+        const rightTaken = db.prepare("SELECT id FROM inventory WHERE character_id = ? AND equipped_slot = 'right_hand'").get(id);
+        const hand = rightTaken ? 'left_hand' : 'right_hand';
+        db.prepare('INSERT INTO inventory (id, character_id, item_id, equipped, equipped_slot) VALUES (?, ?, ?, 1, ?)').run(invId, id, item.id, hand);
+      } else if (item.slot) {
+        db.prepare('INSERT INTO inventory (id, character_id, item_id, equipped, equipped_slot) VALUES (?, ?, ?, 1, ?)').run(invId, id, item.id, item.slot);
+      } else {
+        db.prepare('INSERT INTO inventory (id, character_id, item_id) VALUES (?, ?, ?)').run(invId, id, item.id);
+      }
+    }
+  }
+
+  const starterSkillKeys = ['blades', 'defense', 'foraging'];
+  for (const key of starterSkillKeys) {
+    const skill = db.prepare('SELECT id FROM skills WHERE skill_key = ?').get(key) as any;
+    if (skill) {
+      db.prepare('INSERT INTO character_skills (character_id, skill_id, level, experience) VALUES (?, ?, 1, 0)').run(id, skill.id);
+    }
+  }
+
+  res.json({ id, name });
+});
+
+adminRouter.delete('/characters/:id', requireAdmin, (req, res) => {
+  db.prepare('DELETE FROM inventory WHERE character_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM character_skills WHERE character_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM character_quests WHERE character_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM characters WHERE id = ?').run(req.params.id);
+  res.json({ deleted: true });
+});
+
 // --- Moderation ---
 adminRouter.get('/players', requireAdmin, (_req, res) => {
   res.json(db.prepare(`
-    SELECT c.*, a.username, a.is_admin FROM characters c
+    SELECT c.*, a.email, a.is_admin, a.blocked FROM characters c
     JOIN accounts a ON c.account_id = a.id ORDER BY c.last_active DESC
   `).all());
 });
 
-adminRouter.post('/players/:id/ban', requireAdmin, (req, res) => {
-  // Simple ban by removing account
-  const char = db.prepare('SELECT account_id FROM characters WHERE id = ?').get(req.params.id) as any;
-  if (char) {
-    db.prepare('UPDATE accounts SET parental_controls = ? WHERE id = ?')
-      .run(JSON.stringify({ banned: true, reason: req.body.reason || 'Admin action' }), char.account_id);
+// Block / Unblock accounts
+adminRouter.post('/accounts/:id/block', requireAdmin, (req, res) => {
+  const { reason } = req.body;
+  db.prepare('UPDATE accounts SET blocked = 1, blocked_reason = ? WHERE id = ?').run(reason || null, req.params.id);
+  res.json({ blocked: true });
+});
+
+adminRouter.post('/accounts/:id/unblock', requireAdmin, (_req, res) => {
+  db.prepare('UPDATE accounts SET blocked = 0, blocked_reason = NULL WHERE id = ?').run(_req.params.id);
+  res.json({ blocked: false });
+});
+
+// --- Reports ---
+adminRouter.get('/reports', requireAdmin, (req, res) => {
+  const status = req.query.status as string;
+  let query = `
+    SELECT r.*, reporter.name AS reporter_name
+    FROM reports r
+    LEFT JOIN characters reporter ON r.reporter_character_id = reporter.id
+  `;
+  if (status) {
+    query += ' WHERE r.status = ? ORDER BY r.created_at DESC';
+    res.json(db.prepare(query).all(status));
+  } else {
+    query += ' ORDER BY r.created_at DESC';
+    res.json(db.prepare(query).all());
   }
-  res.json({ banned: true });
+});
+
+adminRouter.get('/accounts/:id/reports', requireAdmin, (req, res) => {
+  const reports = db.prepare(`
+    SELECT r.*, reporter.name AS reporter_name
+    FROM reports r
+    LEFT JOIN characters reporter ON r.reporter_character_id = reporter.id
+    WHERE r.target_account_id = ? ORDER BY r.created_at DESC
+  `).all(req.params.id);
+  res.json(reports);
+});
+
+adminRouter.post('/reports/:id/resolve', requireAdmin, (req, res) => {
+  const { admin_note } = req.body;
+  db.prepare("UPDATE reports SET status = 'resolved', admin_note = ?, resolved_at = datetime('now') WHERE id = ?")
+    .run(admin_note || null, req.params.id);
+  res.json({ resolved: true });
+});
+
+adminRouter.post('/reports/:id/dismiss', requireAdmin, (req, res) => {
+  const { admin_note } = req.body;
+  db.prepare("UPDATE reports SET status = 'dismissed', admin_note = ?, resolved_at = datetime('now') WHERE id = ?")
+    .run(admin_note || null, req.params.id);
+  res.json({ dismissed: true });
 });

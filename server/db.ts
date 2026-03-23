@@ -1,7 +1,8 @@
 import Database, { Database as DatabaseType } from 'better-sqlite3';
 import path from 'path';
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'ceylon.db');
+// Use project root so seed (node dist/...) and server (tsx or node) share the same DB
+const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'ceylon.db');
 
 const db: DatabaseType = new Database(DB_PATH);
 
@@ -75,18 +76,32 @@ export function initDatabase(): void {
       durability_max INTEGER DEFAULT 100,
       properties TEXT DEFAULT '{}',
       tags TEXT DEFAULT '[]',
-      lore_text TEXT
+      lore_text TEXT,
+      size INTEGER DEFAULT 1,
+      container_slots INTEGER DEFAULT 0
     );
 
     -- Accounts
     CREATE TABLE IF NOT EXISTS accounts (
       id TEXT PRIMARY KEY,
-      username TEXT UNIQUE NOT NULL,
+      email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now')),
       last_login TEXT,
       is_admin INTEGER DEFAULT 0,
-      parental_controls TEXT DEFAULT '{}'
+      parental_controls TEXT DEFAULT '{}',
+      blocked INTEGER DEFAULT 0,
+      blocked_reason TEXT
+    );
+
+    -- Invites (token-based email invites)
+    CREATE TABLE IF NOT EXISTS invites (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      token TEXT UNIQUE NOT NULL,
+      invited_by TEXT REFERENCES characters(id),
+      created_at TEXT DEFAULT (datetime('now')),
+      accepted INTEGER DEFAULT 0
     );
 
     -- Characters
@@ -285,6 +300,19 @@ export function initDatabase(): void {
       end_time TEXT
     );
 
+    -- Player reports
+    CREATE TABLE IF NOT EXISTS reports (
+      id TEXT PRIMARY KEY,
+      reporter_character_id TEXT NOT NULL REFERENCES characters(id),
+      target_account_id TEXT NOT NULL REFERENCES accounts(id),
+      target_character_name TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT DEFAULT 'open',
+      admin_note TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+
     -- Admin settings (key-value store)
     CREATE TABLE IF NOT EXISTS admin_settings (
       key TEXT PRIMARY KEY,
@@ -313,9 +341,26 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_chat_channel ON chat_log(channel, timestamp);
   `);
 
+  // Migration: rename username -> email on accounts (for existing DBs)
+  try {
+    const cols = db.prepare("PRAGMA table_info(accounts)").all() as any[];
+    if (cols.some((c: any) => c.name === 'username') && !cols.some((c: any) => c.name === 'email')) {
+      db.exec('ALTER TABLE accounts RENAME COLUMN username TO email');
+      console.log('[db] Migrated accounts.username -> accounts.email');
+    }
+  } catch (_) {}
+
+  // Migration: add blocked column to accounts
+  try { db.exec('ALTER TABLE accounts ADD COLUMN blocked INTEGER DEFAULT 0'); } catch (_) {}
+  try { db.exec('ALTER TABLE accounts ADD COLUMN blocked_reason TEXT'); } catch (_) {}
+
   // Migration: add item_key / skill_key for existing DBs (no-op if columns already exist)
   try { db.exec('ALTER TABLE items ADD COLUMN item_key TEXT'); } catch (_) {}
   try { db.exec('ALTER TABLE skills ADD COLUMN skill_key TEXT'); } catch (_) {}
+
+  // Migration: add size and container_slots to items
+  try { db.exec('ALTER TABLE items ADD COLUMN size INTEGER DEFAULT 1'); } catch (_) {}
+  try { db.exec('ALTER TABLE items ADD COLUMN container_slots INTEGER DEFAULT 0'); } catch (_) {}
   try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_items_item_key ON items(item_key) WHERE item_key IS NOT NULL'); } catch (_) {}
   try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_skills_skill_key ON skills(skill_key) WHERE skill_key IS NOT NULL'); } catch (_) {}
 

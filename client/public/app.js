@@ -5,7 +5,7 @@
   // ---- State ----
   let accountId = null;
   let characterId = null;
-  let username = null;
+  let email = null;
   let isAdmin = false;
   let ws = null;
   let reconnectAttempts = 0;
@@ -32,31 +32,31 @@
   const screenChar = $('screen-character');
   const screenGame = $('screen-game');
 
-  const AUTH_COOKIE = 'ceylon_auth';
-  const COOKIE_DAYS = 30;
+  const AUTH_STORAGE_KEY = 'ceylon_auth';
 
-  function setAuthCookie(accountId, username, characterId) {
-    const value = JSON.stringify({ accountId, username, characterId });
-    const expires = new Date(Date.now() + COOKIE_DAYS * 86400 * 1000).toUTCString();
-    document.cookie = AUTH_COOKIE + '=' + encodeURIComponent(value) + '; path=/; expires=' + expires + '; SameSite=Lax';
-  }
-
-  function clearAuthCookie() {
-    document.cookie = AUTH_COOKIE + '=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-  }
-
-  function getAuthCookie() {
-    const match = document.cookie.match(new RegExp('(?:^|; )' + AUTH_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
-    if (!match) return null;
+  function setAuthStorage(accountId, email, characterId) {
     try {
-      return JSON.parse(decodeURIComponent(match[1]));
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ accountId, email, characterId }));
+    } catch (e) { /* ignore quota / private */ }
+  }
+
+  function clearAuthStorage() {
+    try {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    } catch (e) {}
+  }
+
+  function getAuthStorage() {
+    try {
+      const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
     } catch {
       return null;
     }
   }
 
   const loginPanel = $('auth-login');
-  const regPanel = $('auth-register');
 
   const gameLog = $('game-log');
   const cmdInput = $('cmd-input');
@@ -76,32 +76,22 @@
   }
 
   // ---- Auth ----
-  $('btn-show-register').addEventListener('click', () => {
-    loginPanel.classList.add('hidden');
-    regPanel.classList.remove('hidden');
-  });
-
-  $('btn-show-login').addEventListener('click', () => {
-    regPanel.classList.add('hidden');
-    loginPanel.classList.remove('hidden');
-  });
-
   $('btn-login').addEventListener('click', async () => {
-    const user = $('login-username').value.trim();
+    const emailVal = $('login-email').value.trim();
     const pass = $('login-password').value;
-    if (!user || !pass) { $('login-error').textContent = 'Enter username and password'; return; }
+    if (!emailVal || !pass) { $('login-error').textContent = 'Enter email and password'; return; }
 
     try {
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: user, password: pass }),
+        body: JSON.stringify({ email: emailVal, password: pass }),
       });
       const data = await res.json();
       if (!res.ok) { $('login-error').textContent = data.error; return; }
 
       accountId = data.accountId;
-      username = data.username;
+      email = data.email;
       isAdmin = data.isAdmin;
       showCharacterSelect(data.characters);
     } catch (e) {
@@ -109,37 +99,14 @@
     }
   });
 
-  $('btn-register').addEventListener('click', async () => {
-    const user = $('reg-username').value.trim();
-    const pass = $('reg-password').value;
-    if (!user || !pass) { $('reg-error').textContent = 'Enter username and password'; return; }
-
-    try {
-      const res = await fetch('/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: user, password: pass }),
-      });
-      const data = await res.json();
-      if (!res.ok) { $('reg-error').textContent = data.error; return; }
-
-      accountId = data.accountId;
-      username = user;
-      showCharacterSelect([]);
-    } catch (e) {
-      $('reg-error').textContent = 'Connection error';
-    }
-  });
-
-  // Enter key on login/register
   $('login-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-login').click(); });
-  $('reg-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-register').click(); });
+  $('login-email').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('login-password').focus(); });
 
   function doLogout() {
-    clearAuthCookie();
+    clearAuthStorage();
     accountId = null;
     characterId = null;
-    username = null;
+    email = null;
     isAdmin = false;
     if (ws) ws.close();
     ws = null;
@@ -152,26 +119,37 @@
   function showCharacterSelect(characters) {
     showScreen(screenChar);
     const list = $('character-list');
+    const createForm = $('character-create');
+    const createLink = $('character-create-link');
     list.innerHTML = '';
 
     if (characters.length === 0) {
-      list.innerHTML = '<p style="color:var(--text-dim);margin-bottom:12px;">No characters yet. Create one below.</p>';
-    }
+      createForm.style.display = '';
+      createLink.style.display = 'none';
+    } else {
+      createForm.style.display = 'none';
+      createLink.style.display = '';
 
-    for (const char of characters) {
-      const card = document.createElement('div');
-      card.className = 'char-card';
-      card.innerHTML = `
-        <div>
-          <div class="char-card-name">${escapeHtml(char.name)}</div>
-          <div class="char-card-info">Level ${char.level} ${char.background}</div>
-        </div>
-        <div style="color:var(--accent);">Play &rarr;</div>
-      `;
-      card.addEventListener('click', () => enterGame(char.id));
-      list.appendChild(card);
+      for (const char of characters) {
+        const card = document.createElement('div');
+        card.className = 'char-card';
+        card.innerHTML = `
+          <div>
+            <div class="char-card-name">${escapeHtml(char.name)}</div>
+            <div class="char-card-info">Level ${char.level} ${char.background}</div>
+          </div>
+          <div style="color:var(--accent);">Play &rarr;</div>
+        `;
+        card.addEventListener('click', () => enterGame(char.id));
+        list.appendChild(card);
+      }
     }
   }
+
+  $('btn-show-create').addEventListener('click', () => {
+    $('character-create').style.display = '';
+    $('character-create-link').style.display = 'none';
+  });
 
   $('btn-create-char').addEventListener('click', async () => {
     const name = $('char-name').value.trim();
@@ -196,7 +174,7 @@
   // ---- WebSocket / Game Entry ----
   function enterGame(charId) {
     characterId = charId;
-    setAuthCookie(accountId, username, characterId);
+    setAuthStorage(accountId, email, characterId);
     showScreen(screenGame);
     gameLog.innerHTML = '';
     connectWebSocket();
@@ -274,15 +252,17 @@
     // Room description under title (in same box; tap box to collapse)
     const titleBox = $('room-title-box');
     const descText = $('room-description-text');
+    const descRow = titleBox.querySelector('.room-desc-row');
     if (data.description) {
       descText.innerHTML = formatContent(data.description);
       descText.style.display = '';
-      titleBox.classList.remove('collapsed');
+      if (descRow) descRow.classList.remove('compass-only');
     } else {
       descText.innerHTML = '';
       descText.style.display = 'none';
-      titleBox.classList.add('collapsed');
+      if (descRow) descRow.classList.add('compass-only');
     }
+    // Keep collapsed state: do not toggle titleBox.classList so user's choice persists across room changes
 
     // Exits: order N, S, E, W, NW, NE, SW, SE then others
     const EXIT_ORDER = ['north', 'south', 'east', 'west', 'northwest', 'northeast', 'southwest', 'southeast'];
@@ -308,7 +288,14 @@
     }
     exitsBar.appendChild(chipsWrap);
 
-    // Compass: 3x3 grid, highlight available directions
+    // Compass: 3x3 grid, highlight available directions; map button in center
+    const compassMount = $('room-compass-mount');
+    const btnMap = $('btn-map');
+    const oldCompass = compassMount.querySelector('.exits-compass');
+    if (oldCompass) {
+      if (btnMap && oldCompass.contains(btnMap)) btnMap.remove();
+      oldCompass.remove();
+    }
     const compassDirOrder = ['northwest', 'north', 'northeast', 'west', null, 'east', 'southwest', 'south', 'southeast'];
     const exitSet = new Set(exits.map(e => e.direction.toLowerCase()));
     const compass = document.createElement('div');
@@ -318,8 +305,8 @@
     compassDirOrder.forEach(d => {
       const cell = document.createElement('span');
       if (d === null) {
-        cell.className = 'compass-cell compass-center';
-        cell.textContent = '·';
+        cell.className = 'compass-cell compass-center compass-map-cell';
+        if (btnMap) cell.appendChild(btnMap);
       } else {
         cell.className = 'compass-cell' + (exitSet.has(d) ? ' compass-available' : ' compass-unavailable');
         cell.textContent = arrows[d] || '';
@@ -327,7 +314,7 @@
       }
       compass.appendChild(cell);
     });
-    exitsBar.appendChild(compass);
+    compassMount.appendChild(compass);
 
     // Entities
     const npcs = data.npcs || [];
@@ -367,9 +354,9 @@
 
     // Show combat row when creatures present
     if (creatures.length > 0 || !data.safeZone) {
-      combatRow.classList.remove('hidden');
+      if (combatRow) combatRow.classList.remove('hidden');
     } else {
-      combatRow.classList.add('hidden');
+      if (combatRow) combatRow.classList.add('hidden');
     }
   }
 
@@ -644,6 +631,7 @@
 
   // ---- Hotkey Bar ----
   function renderHotkeys() {
+    if (!hotkeyBar) return;
     hotkeyBar.innerHTML = '';
     for (const hk of hotkeys) {
       const btn = document.createElement('button');
@@ -661,10 +649,11 @@
     }
   }
 
-  // Room title box: tap to collapse/expand description
+  // Room title row (title + chevron): click to collapse/expand description row
+  const roomTitleRow = $('room-title-row');
   const roomTitleBox = $('room-title-box');
-  if (roomTitleBox) {
-    roomTitleBox.addEventListener('click', () => roomTitleBox.classList.toggle('collapsed'));
+  if (roomTitleRow && roomTitleBox) {
+    roomTitleRow.addEventListener('click', () => roomTitleBox.classList.toggle('collapsed'));
   }
 
   renderHotkeys();
@@ -681,12 +670,12 @@
     // Don't auto-focus input when scrolling log
   });
 
-  // Restore session from cookie on load
+  // Restore session from storage on load (persists until logout)
   (function tryRestoreAuth() {
-    const auth = getAuthCookie();
+    const auth = getAuthStorage();
     if (auth && auth.accountId && auth.characterId) {
       accountId = auth.accountId;
-      username = auth.username || '';
+      email = auth.email || '';
       characterId = auth.characterId;
       showScreen(screenGame);
       gameLog.innerHTML = '';

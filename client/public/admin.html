@@ -70,6 +70,8 @@
         <button class="tab" data-tab="quests">Quests</button>
         <button class="tab" data-tab="skills">Skills</button>
         <button class="tab" data-tab="players">Players</button>
+        <button class="tab" data-tab="accounts">Accounts</button>
+        <button class="tab" data-tab="reports">Reports</button>
         <button class="tab" data-tab="settings">Settings</button>
       </div>
 
@@ -137,9 +139,35 @@
       </div>
 
       <div class="tab-content" id="tab-players">
-        <h2>Player Management</h2>
-        <input class="search-input" id="player-search" placeholder="Search players...">
-        <div class="list-panel" id="player-list" style="max-width:800px;"></div>
+        <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-player">+ New Character</button></div>
+        <div class="grid">
+          <div><input class="search-input" id="player-search" placeholder="Search players..."><div class="list-panel" id="player-list"></div></div>
+          <div class="form-panel" id="player-form"><p style="opacity:0.5;">Select a player or create a character</p></div>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-accounts">
+        <div style="margin-bottom:12px;"><button class="btn btn-new" id="btn-new-account">+ New Account</button></div>
+        <div class="grid">
+          <div><input class="search-input" id="account-search" placeholder="Search by email..."><div class="list-panel" id="account-list"></div></div>
+          <div class="form-panel" id="account-form"><p style="opacity:0.5;">Select or create an account</p></div>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-reports">
+        <h2>Player Reports</h2>
+        <div style="margin-bottom:12px;">
+          <select id="report-filter" class="search-input" style="max-width:200px;display:inline-block;">
+            <option value="">All</option>
+            <option value="open" selected>Open</option>
+            <option value="resolved">Resolved</option>
+            <option value="dismissed">Dismissed</option>
+          </select>
+        </div>
+        <div class="grid">
+          <div class="list-panel" id="report-list"></div>
+          <div class="form-panel" id="report-form"><p style="opacity:0.5;">Select a report</p></div>
+        </div>
       </div>
 
       <div class="tab-content" id="tab-settings">
@@ -211,7 +239,7 @@
     });
 
     function loadTab(name) {
-      const loaders = { dashboard:loadDashboard, rooms:loadRooms, regions:loadRegions, items:loadItems, npcs:loadNpcs, creatures:loadCreatures, quests:loadQuests, skills:loadSkills, players:loadPlayers };
+      const loaders = { dashboard:loadDashboard, rooms:loadRooms, regions:loadRegions, items:loadItems, npcs:loadNpcs, creatures:loadCreatures, quests:loadQuests, skills:loadSkills, players:loadPlayers, accounts:loadAccounts, reports:loadReports };
       if (loaders[name]) loaders[name]();
     }
 
@@ -226,7 +254,9 @@
         showErr('Session expired. Please login again.');
         throw new Error('Unauthorized');
       }
-      return res.json();
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      return data;
     }
 
     function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
@@ -712,18 +742,312 @@
     }
 
     // ---- Players ----
+    let playersCache = [];
     async function loadPlayers() {
-      const players = await api('/players');
+      playersCache = await api('/players');
       const el = document.getElementById('player-list');
       const searchEl = document.getElementById('player-search');
       const render = (filter) => {
-        const filtered = filter ? players.filter(p => (p.name||'').toLowerCase().includes(filter)||(p.username||'').toLowerCase().includes(filter)) : players;
-        el.innerHTML = filtered.map(p =>
-          `<div class="list-item"><div class="list-item-title">${esc(p.name)} <span class="list-item-sub">(${esc(p.username)})</span></div><div class="list-item-sub">Level ${p.level} ${p.background||''} | Room: ${esc(p.room_id||'?')} | HP: ${p.health}/${p.health_max} | Last: ${p.last_active||'never'}</div></div>`
-        ).join('');
+        const filtered = filter ? playersCache.filter(p => (p.name||'').toLowerCase().includes(filter)||(p.email||'').toLowerCase().includes(filter)) : playersCache;
+        el.innerHTML = filtered.map(p => {
+          const idx = playersCache.indexOf(p);
+          return `<div class="list-item" data-index="${idx}"><div class="list-item-title">${esc(p.name)} <span class="list-item-sub">(${esc(p.email)})</span></div><div class="list-item-sub">Level ${p.level} ${p.background||''} | HP: ${p.health}/${p.health_max} | Last: ${p.last_active||'never'}</div></div>`;
+        }).join('');
       };
       render('');
       if (searchEl) searchEl.oninput = () => render(searchEl.value.toLowerCase());
+      el.onclick = e => { const li = e.target.closest('.list-item'); if(li) showPlayerDetail(playersCache[li.dataset.index]); };
+    }
+    document.getElementById('btn-new-player').addEventListener('click', () => showNewPlayerForm());
+
+    function showPlayerDetail(p) {
+      const f = document.getElementById('player-form');
+      f.innerHTML = `
+        <h3>${esc(p.name)}</h3>
+        <div class="list-item-sub" style="margin-bottom:12px;">Account: ${esc(p.email)} | Level ${p.level} ${esc(p.background||'')} | HP: ${p.health}/${p.health_max}</div>
+        <div class="row"><div><label>Room ID</label><div style="font-size:12px;word-break:break-all;">${esc(p.room_id||'none')}</div></div></div>
+        <div class="row" style="margin-top:8px;">
+          <div><label>Str</label><div>${p.strength}</div></div><div><label>Agi</label><div>${p.agility}</div></div><div><label>End</label><div>${p.endurance}</div></div><div><label>Int</label><div>${p.intellect}</div></div>
+          <div><label>Per</label><div>${p.perception}</div></div><div><label>Pre</label><div>${p.presence}</div></div><div><label>Wil</label><div>${p.willpower}</div></div>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <div><label>Gold</label><div>${p.currency_gold||0}</div></div><div><label>Silver</label><div>${p.currency_silver||0}</div></div><div><label>Copper</label><div>${p.currency_copper||0}</div></div>
+        </div>
+        <div id="pf-msg" style="margin-top:12px;"></div>
+        <button class="btn btn-delete" id="pf-del" style="margin-top:12px;">Delete Character</button>
+      `;
+      document.getElementById('pf-del').addEventListener('click', async () => {
+        if (confirm('Permanently delete character "' + p.name + '"? This cannot be undone.')) {
+          await api('/characters/' + p.id, 'DELETE');
+          document.getElementById('player-form').innerHTML = '<p>Character deleted.</p>';
+          loadPlayers();
+        }
+      });
+    }
+
+    async function showNewPlayerForm() {
+      let accounts = [];
+      try { accounts = await api('/accounts'); } catch(e) {}
+      const accountOpts = accounts.map(a => `<option value="${esc(a.id)}">${esc(a.email)}${a.is_admin?' (admin)':''}</option>`).join('');
+      const f = document.getElementById('player-form');
+      f.innerHTML = `
+        <h3>New Character</h3>
+        <label>Account</label><select id="pf-account"><option value="">-- select account --</option>${accountOpts}</select>
+        <label>Name (letters only, 2-20 chars)</label><input id="pf-name" placeholder="CharacterName">
+        <label>Background</label>
+        <select id="pf-bg">
+          <option value="deckhand">Deckhand</option>
+          <option value="ships_clerk">Ship's Clerk</option>
+          <option value="traders_assistant">Trader's Assistant</option>
+          <option value="runaway_apprentice">Runaway Apprentice</option>
+          <option value="farmers_child">Farmer's Child</option>
+          <option value="former_soldier">Former Soldier</option>
+          <option value="temple_student">Temple Student</option>
+          <option value="fishermans_kin">Fisherman's Kin</option>
+        </select>
+        <div id="pf-msg"></div>
+        <button class="btn btn-save" id="pf-save">Create Character</button>
+      `;
+      document.getElementById('pf-save').addEventListener('click', async () => {
+        const accountId = document.getElementById('pf-account').value;
+        const name = document.getElementById('pf-name').value;
+        const bg = document.getElementById('pf-bg').value;
+        const msgEl = document.getElementById('pf-msg');
+        if (!accountId) { msgEl.innerHTML = '<div class="msg msg-err">Select an account</div>'; return; }
+        if (!name) { msgEl.innerHTML = '<div class="msg msg-err">Enter a name</div>'; return; }
+        try {
+          const result = await api('/accounts/' + accountId + '/characters', 'POST', { name, background: bg });
+          msgEl.innerHTML = '<div class="msg msg-ok">Character "' + esc(result.name) + '" created!</div>';
+          loadPlayers();
+        } catch(e) { if (e.message !== 'Unauthorized') msgEl.innerHTML = '<div class="msg msg-err">' + e.message + '</div>'; }
+      });
+    }
+
+    // ---- Accounts ----
+    let accountsCache = [];
+    async function loadAccounts() {
+      accountsCache = await api('/accounts');
+      const el = document.getElementById('account-list');
+      const searchEl = document.getElementById('account-search');
+      const render = (filter) => {
+        const filtered = filter ? accountsCache.filter(a => (a.email||'').toLowerCase().includes(filter)) : accountsCache;
+        el.innerHTML = filtered.map(a => {
+          const idx = accountsCache.indexOf(a);
+          const badges = [];
+          if (a.is_admin) badges.push('<span class="list-item-sub">(admin)</span>');
+          if (a.blocked) badges.push('<span style="color:var(--danger);">[BLOCKED]</span>');
+          if (a.open_report_count > 0) badges.push('<span style="color:#e8a83e;">[' + a.open_report_count + ' report' + (a.open_report_count > 1 ? 's' : '') + ']</span>');
+          return `<div class="list-item" data-index="${idx}">
+            <div class="list-item-title">${esc(a.email)} ${badges.join(' ')}</div>
+            <div class="list-item-sub">Characters: ${a.character_count || 0} | Created: ${esc(a.created_at || '—')} | Last login: ${esc(a.last_login || 'never')}</div>
+          </div>`;
+        }).join('');
+      };
+      render('');
+      if (searchEl) searchEl.oninput = () => render(searchEl.value.toLowerCase());
+      el.onclick = e => { const li = e.target.closest('.list-item'); if(li) showAccountDetail(accountsCache[li.dataset.index]); };
+    }
+    document.getElementById('btn-new-account').addEventListener('click', () => showNewAccountForm());
+
+    async function showAccountDetail(a) {
+      let chars = [];
+      let reports = [];
+      try { chars = await api('/accounts/' + a.id + '/characters'); } catch(e) {}
+      try { reports = await api('/accounts/' + a.id + '/reports'); } catch(e) {}
+      const f = document.getElementById('account-form');
+
+      const blockedBadge = a.blocked ? '<span style="color:var(--danger);font-weight:bold;"> [BLOCKED]</span>' : '';
+      const blockBtn = a.blocked
+        ? `<button class="btn btn-save" id="af-unblock">Unblock Account</button>`
+        : `<div style="margin-top:8px;"><label>Reason (optional)</label><input id="af-block-reason" placeholder="Reason for blocking"><button class="btn btn-delete" id="af-block" style="margin-top:4px;">Block Account</button></div>`;
+
+      const reportsHtml = reports.length ? reports.map(r =>
+        `<div class="list-item" style="border-left:3px solid ${r.status==='open'?'var(--danger)':r.status==='resolved'?'var(--success)':'var(--border)'};">
+          <div class="list-item-title">${esc(r.target_character_name)} — <span style="text-transform:uppercase;font-size:11px;">${esc(r.status)}</span></div>
+          <div class="list-item-sub">Reported by: ${esc(r.reporter_name||'unknown')} | ${esc(r.created_at||'')}</div>
+          <div style="margin-top:4px;font-size:13px;">${esc(r.reason)}</div>
+          ${r.admin_note ? '<div class="list-item-sub" style="margin-top:4px;">Admin note: ' + esc(r.admin_note) + '</div>' : ''}
+        </div>`
+      ).join('') : '<p style="opacity:0.5;">No reports</p>';
+
+      f.innerHTML = `
+        <h3>${esc(a.email)} ${a.is_admin ? '(admin)' : ''}${blockedBadge}</h3>
+        <div class="list-item-sub" style="margin-bottom:8px;">ID: ${esc(a.id)}</div>
+        <div class="list-item-sub" style="margin-bottom:8px;">Created: ${esc(a.created_at||'—')} | Last login: ${esc(a.last_login||'never')}</div>
+        ${a.blocked && a.blocked_reason ? '<div class="msg msg-err" style="margin-bottom:8px;">Block reason: ' + esc(a.blocked_reason) + '</div>' : ''}
+
+        <h3 style="margin-top:16px;">Block Status</h3>
+        <div id="af-block-section">${blockBtn}</div>
+        <div id="af-block-msg"></div>
+
+        <h3 style="margin-top:16px;">Reports (${reports.length})</h3>
+        <div id="af-reports">${reportsHtml}</div>
+
+        <h3 style="margin-top:16px;">Characters (${chars.length})</h3>
+        <div id="af-chars">${chars.length ? chars.map(c =>
+          `<div class="list-item" style="display:flex;justify-content:space-between;align-items:center;">
+            <div><div class="list-item-title">${esc(c.name)}</div><div class="list-item-sub">Level ${c.level} ${esc(c.background||'')} | HP: ${c.health}/${c.health_max}</div></div>
+            <button class="btn btn-delete af-del-char" data-cid="${esc(c.id)}" data-cname="${esc(c.name)}">Delete</button>
+          </div>`
+        ).join('') : '<p style="opacity:0.5;">No characters</p>'}</div>
+        <h3 style="margin-top:16px;">Create Character on this Account</h3>
+        <label>Name (letters only, 2-20 chars)</label><input id="af-char-name" placeholder="CharacterName">
+        <label>Background</label>
+        <select id="af-char-bg">
+          <option value="deckhand">Deckhand</option>
+          <option value="ships_clerk">Ship's Clerk</option>
+          <option value="traders_assistant">Trader's Assistant</option>
+          <option value="runaway_apprentice">Runaway Apprentice</option>
+          <option value="farmers_child">Farmer's Child</option>
+          <option value="former_soldier">Former Soldier</option>
+          <option value="temple_student">Temple Student</option>
+          <option value="fishermans_kin">Fisherman's Kin</option>
+        </select>
+        <div id="af-char-msg"></div>
+        <button class="btn btn-save" id="af-char-create">Create Character</button>
+        <hr style="border-color:var(--border);margin:20px 0;">
+        <div id="af-msg"></div>
+        ${a.is_admin ? '' : '<button class="btn btn-delete" id="af-del">Delete Account &amp; All Characters</button>'}
+      `;
+
+      // Block / Unblock
+      const blockEl = document.getElementById('af-block');
+      const unblockEl = document.getElementById('af-unblock');
+      if (blockEl) {
+        blockEl.addEventListener('click', async () => {
+          const reason = document.getElementById('af-block-reason').value;
+          if (confirm('Block account "' + a.email + '"? They will not be able to log in.')) {
+            await api('/accounts/' + a.id + '/block', 'POST', { reason });
+            a.blocked = 1; a.blocked_reason = reason;
+            document.getElementById('af-block-msg').innerHTML = '<div class="msg msg-ok">Account blocked.</div>';
+            showAccountDetail(a);
+            loadAccounts();
+          }
+        });
+      }
+      if (unblockEl) {
+        unblockEl.addEventListener('click', async () => {
+          await api('/accounts/' + a.id + '/unblock', 'POST');
+          a.blocked = 0; a.blocked_reason = null;
+          document.getElementById('af-block-msg').innerHTML = '<div class="msg msg-ok">Account unblocked.</div>';
+          showAccountDetail(a);
+          loadAccounts();
+        });
+      }
+
+      document.getElementById('af-char-create').addEventListener('click', async () => {
+        const name = document.getElementById('af-char-name').value;
+        const bg = document.getElementById('af-char-bg').value;
+        const msgEl = document.getElementById('af-char-msg');
+        if (!name) { msgEl.innerHTML = '<div class="msg msg-err">Enter a name</div>'; return; }
+        try {
+          const result = await api('/accounts/' + a.id + '/characters', 'POST', { name, background: bg });
+          msgEl.innerHTML = '<div class="msg msg-ok">Character "' + esc(result.name) + '" created!</div>';
+          showAccountDetail(a);
+          loadAccounts();
+        } catch(e) { if (e.message !== 'Unauthorized') msgEl.innerHTML = '<div class="msg msg-err">' + e.message + '</div>'; }
+      });
+
+      f.querySelectorAll('.af-del-char').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (confirm('Permanently delete character "' + btn.dataset.cname + '"?')) {
+            await api('/characters/' + btn.dataset.cid, 'DELETE');
+            showAccountDetail(a);
+            loadAccounts();
+          }
+        });
+      });
+
+      const afDelBtn = document.getElementById('af-del');
+      if (afDelBtn) {
+        afDelBtn.addEventListener('click', async () => {
+          if (confirm('Permanently delete account "' + a.email + '" and all its characters? This cannot be undone.')) {
+            await api('/accounts/' + a.id, 'DELETE');
+            document.getElementById('account-form').innerHTML = '<p>Account deleted.</p>';
+            loadAccounts();
+          }
+        });
+      }
+    }
+
+    function showNewAccountForm() {
+      const f = document.getElementById('account-form');
+      f.innerHTML = `
+        <h3>New Account</h3>
+        <label>Email</label><input id="af-email" type="email" placeholder="user@example.com">
+        <label>Password (min 4 chars)</label><input id="af-pass" type="password">
+        <label>Admin?</label><select id="af-admin"><option value="0">No</option><option value="1">Yes</option></select>
+        <div id="af-msg"></div>
+        <button class="btn btn-save" id="af-save">Create Account</button>
+      `;
+      document.getElementById('af-save').addEventListener('click', async () => {
+        const email = document.getElementById('af-email').value;
+        const password = document.getElementById('af-pass').value;
+        const is_admin = document.getElementById('af-admin').value === '1';
+        const msgEl = document.getElementById('af-msg');
+        if (!email) { msgEl.innerHTML = '<div class="msg msg-err">Enter an email</div>'; return; }
+        if (!password || password.length < 4) { msgEl.innerHTML = '<div class="msg msg-err">Password must be at least 4 characters</div>'; return; }
+        try {
+          const result = await api('/accounts', 'POST', { email, password, is_admin });
+          msgEl.innerHTML = '<div class="msg msg-ok">Account created for ' + esc(result.email) + '!</div>';
+          loadAccounts();
+        } catch(e) { if (e.message !== 'Unauthorized') msgEl.innerHTML = '<div class="msg msg-err">' + e.message + '</div>'; }
+      });
+    }
+
+    // ---- Reports ----
+    let reportsCache = [];
+    async function loadReports() {
+      const status = document.getElementById('report-filter').value;
+      const query = status ? '?status=' + status : '';
+      reportsCache = await api('/reports' + query);
+      const el = document.getElementById('report-list');
+      el.innerHTML = reportsCache.map((r, idx) => {
+        const color = r.status === 'open' ? 'var(--danger)' : r.status === 'resolved' ? 'var(--success)' : 'var(--border)';
+        return `<div class="list-item" data-index="${idx}" style="border-left:3px solid ${color};">
+          <div class="list-item-title">${esc(r.target_character_name)} <span class="list-item-sub" style="text-transform:uppercase;">${esc(r.status)}</span></div>
+          <div class="list-item-sub">By: ${esc(r.reporter_name||'unknown')} | ${esc(r.created_at||'')}</div>
+        </div>`;
+      }).join('') || '<p style="opacity:0.5;padding:12px;">No reports found</p>';
+      el.onclick = e => { const li = e.target.closest('.list-item'); if(li) showReportDetail(reportsCache[li.dataset.index]); };
+    }
+    document.getElementById('report-filter').addEventListener('change', loadReports);
+
+    function showReportDetail(r) {
+      const f = document.getElementById('report-form');
+      const isOpen = r.status === 'open';
+      f.innerHTML = `
+        <h3>Report: ${esc(r.target_character_name)}</h3>
+        <div class="list-item-sub" style="margin-bottom:4px;">Status: <strong style="text-transform:uppercase;">${esc(r.status)}</strong></div>
+        <div class="list-item-sub" style="margin-bottom:4px;">Reported by: ${esc(r.reporter_name || 'unknown')}</div>
+        <div class="list-item-sub" style="margin-bottom:12px;">Date: ${esc(r.created_at || '')}</div>
+        <label>Reason</label>
+        <div style="background:#2a2a2a;padding:10px;border-radius:3px;margin-bottom:12px;white-space:pre-wrap;">${esc(r.reason)}</div>
+        ${r.admin_note ? '<label>Admin Note</label><div style="background:#2a2a2a;padding:10px;border-radius:3px;margin-bottom:12px;">' + esc(r.admin_note) + '</div>' : ''}
+        ${r.resolved_at ? '<div class="list-item-sub" style="margin-bottom:12px;">Resolved: ' + esc(r.resolved_at) + '</div>' : ''}
+        ${isOpen ? `
+          <label>Admin Note (optional)</label><input id="rf-note" placeholder="Add a note...">
+          <div id="rf-msg" style="margin-top:8px;"></div>
+          <div style="margin-top:12px;">
+            <button class="btn btn-save" id="rf-resolve">Resolve</button>
+            <button class="btn" id="rf-dismiss" style="background:var(--info);color:#fff;">Dismiss</button>
+          </div>
+        ` : ''}
+      `;
+      if (isOpen) {
+        document.getElementById('rf-resolve').addEventListener('click', async () => {
+          const note = document.getElementById('rf-note').value;
+          await api('/reports/' + r.id + '/resolve', 'POST', { admin_note: note });
+          document.getElementById('rf-msg').innerHTML = '<div class="msg msg-ok">Report resolved.</div>';
+          loadReports();
+        });
+        document.getElementById('rf-dismiss').addEventListener('click', async () => {
+          const note = document.getElementById('rf-note').value;
+          await api('/reports/' + r.id + '/dismiss', 'POST', { admin_note: note });
+          document.getElementById('rf-msg').innerHTML = '<div class="msg msg-ok">Report dismissed.</div>';
+          loadReports();
+        });
+      }
     }
 
     // ---- Settings ----

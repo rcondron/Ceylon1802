@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Ceylon 1802 — Accept Invite</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="screen active">
+    <div class="auth-container">
+      <h1 class="game-title">Ceylon 1802</h1>
+      <p class="subtitle">A Text Adventure in the Age of Spice</p>
+
+      <div id="invite-loading" class="auth-panel">
+        <p style="color:var(--text-dim);">Loading invite...</p>
+      </div>
+
+      <div id="invite-form" class="auth-panel hidden">
+        <p id="invite-msg" style="margin-bottom:12px;color:var(--text-dim);"></p>
+        <input type="password" id="invite-password" placeholder="Choose a password (4+ chars)" autocomplete="new-password">
+        <input type="password" id="invite-confirm" placeholder="Confirm password" autocomplete="new-password">
+        <button id="btn-accept" class="btn-primary">Create Account & Enter</button>
+        <div id="invite-error" class="error-msg"></div>
+      </div>
+
+      <div id="invite-done" class="auth-panel hidden">
+        <p style="color:var(--success);">Account created! Redirecting to login...</p>
+      </div>
+
+      <div id="invite-invalid" class="auth-panel hidden">
+        <p style="color:var(--danger);">This invite link is invalid or has already been used.</p>
+        <a href="/" class="btn-link" style="margin-top:12px;display:inline-block;">Go to Login</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    const token = window.location.pathname.split('/invite/')[1];
+    if (!token) { showInvalid(); return; }
+
+    const $ = (id) => document.getElementById(id);
+
+    function showInvalid() {
+      $('invite-loading').classList.add('hidden');
+      $('invite-invalid').classList.remove('hidden');
+    }
+
+    fetch('/api/invite/' + encodeURIComponent(token))
+      .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+      .then(({ ok, data }) => {
+        if (!ok) { showInvalid(); return; }
+        $('invite-loading').classList.add('hidden');
+        $('invite-form').classList.remove('hidden');
+        $('invite-msg').textContent = 'You\'ve been invited! Set a password for ' + data.email;
+
+        $('btn-accept').addEventListener('click', async () => {
+          const pass = $('invite-password').value;
+          const confirm = $('invite-confirm').value;
+          if (!pass || pass.length < 4) { $('invite-error').textContent = 'Password must be at least 4 characters'; return; }
+          if (pass !== confirm) { $('invite-error').textContent = 'Passwords do not match'; return; }
+
+          try {
+            const res = await fetch('/api/invite/accept', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: token, password: pass }),
+            });
+            const result = await res.json();
+            if (!res.ok) { $('invite-error').textContent = result.error; return; }
+            $('invite-form').classList.add('hidden');
+            $('invite-done').classList.remove('hidden');
+            setTimeout(() => { window.location.href = '/'; }, 2000);
+          } catch (e) {
+            $('invite-error').textContent = 'Connection error';
+          }
+        });
+
+        $('invite-confirm').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-accept').click(); });
+      })
+      .catch(() => showInvalid());
+  })();
+  </script>
+</body>
+</html>

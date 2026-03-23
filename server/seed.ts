@@ -36,7 +36,7 @@ const insertRegion = db.prepare('INSERT OR REPLACE INTO regions (id, name, descr
 const insertRoom = db.prepare(`INSERT OR REPLACE INTO rooms (id, region_id, title, description_long, description_short, terrain_type, safe_zone, light_level, weather_exposure, ambient_text_pool, interactable_objects, room_tags, resource_nodes, spawn_table_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const insertExit = db.prepare('INSERT OR REPLACE INTO exits (from_room_id, to_room_id, direction, description) VALUES (?, ?, ?, ?)');
 const insertGate = db.prepare('INSERT INTO gates (from_room_id, to_room_id, keywords, description) VALUES (?, ?, ?, ?)');
-const insertItem = db.prepare(`INSERT OR REPLACE INTO items (id, item_key, name, description, category, slot, weight, value, rarity, stackable, max_stack, properties, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+const insertItem = db.prepare(`INSERT OR REPLACE INTO items (id, item_key, name, description, category, slot, weight, value, rarity, stackable, max_stack, properties, tags, size, container_slots) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const insertNpc = db.prepare(`INSERT OR REPLACE INTO npcs (id, name, role, room_id, home_region, description, personality_traits, speech_style, dialogue_tree, shop_inventory, quest_links, ai_prompt_base, knowledge_tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const insertCreature = db.prepare(`INSERT OR REPLACE INTO creatures (id, name, description, level, health_max, attack_min, attack_max, defense, accuracy, dodge, attack_speed, behavior, loot_table, experience_reward, habitat_tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const insertSkill = db.prepare('INSERT OR REPLACE INTO skills (id, skill_key, name, category, description) VALUES (?, ?, ?, ?, ?)');
@@ -80,60 +80,63 @@ insertSkill.run(skills.stealth, 'stealth', 'Stealth', 'Social', 'Moving unseen a
 insertSkill.run(skills.lore, 'lore', 'Lore', 'Social', 'Knowledge of history, legends, and customs');
 
 // ==================== ITEMS ====================
+// size = how many container slots this item occupies; also: if size > player strength, too heavy to carry
+// container_slots = how many slots this item can hold (0 = not a container)
+
 // Weapons
-insertItem.run(items.worn_cutlass, 'worn_cutlass', 'Worn Cutlass', 'A battered but serviceable naval cutlass.', 'weapon', 'hand', 3.0, 25, 'common', 0, 1, JSON.stringify({ damage: 6, type: 'slash' }), '["blade","starter"]');
-insertItem.run(items.small_knife, 'small_knife', 'Small Knife', 'A simple utility knife, sharp enough in a pinch.', 'weapon', 'hand', 0.5, 10, 'common', 0, 1, JSON.stringify({ damage: 3, type: 'pierce' }), '["blade","starter"]');
-insertItem.run(items.quill_knife, 'quill_knife', 'Quill Knife', 'A slim letter opener, barely a weapon.', 'weapon', 'hand', 0.3, 5, 'common', 0, 1, JSON.stringify({ damage: 2, type: 'pierce' }), '["blade","starter"]');
-insertItem.run(items.walking_stick, 'walking_stick', 'Walking Stick', 'A sturdy wooden walking stick.', 'weapon', 'hand', 2.0, 8, 'common', 0, 1, JSON.stringify({ damage: 4, type: 'blunt' }), '["club","starter"]');
-insertItem.run(items.hatchet, 'hatchet', 'Hatchet', 'A small wood-chopping hatchet.', 'weapon', 'hand', 2.5, 20, 'common', 0, 1, JSON.stringify({ damage: 5, type: 'slash' }), '["blade","tool","starter"]');
-insertItem.run(items.iron_cutlass, 'iron_cutlass', 'Iron Cutlass', 'A well-forged cutlass with good balance.', 'weapon', 'hand', 3.0, 80, 'uncommon', 0, 1, JSON.stringify({ damage: 10, type: 'slash' }), '["blade"]');
-insertItem.run(items.fishing_spear, 'fishing_spear', 'Fishing Spear', 'A barbed spear used for river fishing.', 'weapon', 'hand', 3.5, 30, 'common', 0, 1, JSON.stringify({ damage: 7, type: 'pierce' }), '["polearm"]');
+insertItem.run(items.worn_cutlass, 'worn_cutlass', 'Worn Cutlass', 'A battered but serviceable naval cutlass.', 'weapon', 'hand', 3.0, 25, 'common', 0, 1, JSON.stringify({ damage: 6, type: 'slash' }), '["blade","starter"]', 4, 0);
+insertItem.run(items.small_knife, 'small_knife', 'Small Knife', 'A simple utility knife, sharp enough in a pinch.', 'weapon', 'hand', 0.5, 10, 'common', 0, 1, JSON.stringify({ damage: 3, type: 'pierce' }), '["blade","starter"]', 2, 0);
+insertItem.run(items.quill_knife, 'quill_knife', 'Quill Knife', 'A slim letter opener, barely a weapon.', 'weapon', 'hand', 0.3, 5, 'common', 0, 1, JSON.stringify({ damage: 2, type: 'pierce' }), '["blade","starter"]', 1, 0);
+insertItem.run(items.walking_stick, 'walking_stick', 'Walking Stick', 'A sturdy wooden walking stick.', 'weapon', 'hand', 2.0, 8, 'common', 0, 1, JSON.stringify({ damage: 4, type: 'blunt' }), '["club","starter"]', 3, 0);
+insertItem.run(items.hatchet, 'hatchet', 'Hatchet', 'A small wood-chopping hatchet.', 'weapon', 'hand', 2.5, 20, 'common', 0, 1, JSON.stringify({ damage: 5, type: 'slash' }), '["blade","tool","starter"]', 3, 0);
+insertItem.run(items.iron_cutlass, 'iron_cutlass', 'Iron Cutlass', 'A well-forged cutlass with good balance.', 'weapon', 'hand', 3.0, 80, 'uncommon', 0, 1, JSON.stringify({ damage: 10, type: 'slash' }), '["blade"]', 4, 0);
+insertItem.run(items.fishing_spear, 'fishing_spear', 'Fishing Spear', 'A barbed spear used for river fishing.', 'weapon', 'hand', 3.5, 30, 'common', 0, 1, JSON.stringify({ damage: 7, type: 'pierce' }), '["polearm"]', 5, 0);
 
 // Armor
-insertItem.run(items.cotton_shirt, 'cotton_shirt', 'Plain cotton shirt', 'A simple white cotton shirt.', 'armor', 'torso', 0.5, 5, 'common', 0, 1, JSON.stringify({ armor: 1 }), '["cloth","starter"]');
-insertItem.run(items.cotton_robe, 'cotton_robe', 'Cotton Robe', 'A plain cotton robe.', 'armor', 'torso', 0.8, 8, 'common', 0, 1, JSON.stringify({ armor: 1 }), '["cloth","starter"]');
-insertItem.run(items.leather_vest, 'leather_vest', 'Leather Vest', 'A tough leather vest that offers some protection.', 'armor', 'torso', 2.0, 35, 'common', 0, 1, JSON.stringify({ armor: 3 }), '["leather"]');
-insertItem.run(items.straw_hat, 'straw_hat', 'Straw Hat', 'A wide-brimmed straw hat, good for the sun.', 'armor', 'head', 0.3, 5, 'common', 0, 1, JSON.stringify({ armor: 0 }), '["cloth"]');
-insertItem.run(items.leather_boots, 'leather_boots', 'Leather Boots', 'Sturdy leather boots.', 'armor', 'feet', 1.5, 20, 'common', 0, 1, JSON.stringify({ armor: 1 }), '["leather"]');
-insertItem.run(items.brown_leather_pants, 'brown_leather_pants', 'Brown leather pants', 'Sturdy brown leather pants.', 'armor', 'legs', 1.0, 15, 'common', 0, 1, JSON.stringify({ armor: 1 }), '["leather","starter"]');
-insertItem.run(items.canvas_sack, 'canvas_sack', 'Canvas sack', 'A simple canvas sack for carrying belongings.', 'misc', 'back', 0.5, 3, 'common', 0, 1, '{}', '["container","starter"]');
-insertItem.run(items.brown_leather_boots, 'brown_leather_boots', 'Brown leather boots', 'Brown leather boots, well worn but serviceable.', 'armor', 'feet', 1.5, 18, 'common', 0, 1, JSON.stringify({ armor: 1 }), '["leather","starter"]');
-insertItem.run(items.hardened_vest, 'hardened_vest', 'Hardened Leather Vest', 'A leather vest reinforced with metal studs.', 'armor', 'torso', 3.5, 120, 'uncommon', 0, 1, JSON.stringify({ armor: 5 }), '["leather"]');
+insertItem.run(items.cotton_shirt, 'cotton_shirt', 'Plain cotton shirt', 'A simple white cotton shirt.', 'armor', 'torso', 0.5, 5, 'common', 0, 1, JSON.stringify({ armor: 1 }), '["cloth","starter"]', 2, 0);
+insertItem.run(items.cotton_robe, 'cotton_robe', 'Cotton Robe', 'A plain cotton robe.', 'armor', 'torso', 0.8, 8, 'common', 0, 1, JSON.stringify({ armor: 1 }), '["cloth","starter"]', 3, 0);
+insertItem.run(items.leather_vest, 'leather_vest', 'Leather Vest', 'A tough leather vest that offers some protection.', 'armor', 'torso', 2.0, 35, 'common', 0, 1, JSON.stringify({ armor: 3 }), '["leather"]', 3, 0);
+insertItem.run(items.straw_hat, 'straw_hat', 'Straw Hat', 'A wide-brimmed straw hat, good for the sun.', 'armor', 'head', 0.3, 5, 'common', 0, 1, JSON.stringify({ armor: 0 }), '["cloth"]', 1, 0);
+insertItem.run(items.leather_boots, 'leather_boots', 'Leather Boots', 'Sturdy leather boots.', 'armor', 'feet', 1.5, 20, 'common', 0, 1, JSON.stringify({ armor: 1 }), '["leather"]', 2, 0);
+insertItem.run(items.brown_leather_pants, 'brown_leather_pants', 'Brown leather pants', 'Sturdy brown leather pants.', 'armor', 'legs', 1.0, 15, 'common', 0, 1, JSON.stringify({ armor: 1 }), '["leather","starter"]', 3, 2);
+insertItem.run(items.canvas_sack, 'canvas_sack', 'Canvas sack', 'A simple canvas sack for carrying belongings.', 'armor', 'back', 0.5, 3, 'common', 0, 1, '{}', '["container","starter"]', 2, 10);
+insertItem.run(items.brown_leather_boots, 'brown_leather_boots', 'Brown leather boots', 'Brown leather boots, well worn but serviceable.', 'armor', 'feet', 1.5, 18, 'common', 0, 1, JSON.stringify({ armor: 1 }), '["leather","starter"]', 2, 0);
+insertItem.run(items.hardened_vest, 'hardened_vest', 'Hardened Leather Vest', 'A leather vest reinforced with metal studs.', 'armor', 'torso', 3.5, 120, 'uncommon', 0, 1, JSON.stringify({ armor: 5 }), '["leather"]', 4, 0);
 
 // Food
-insertItem.run(items.bread_loaf, 'bread_loaf', 'Loaf of Bread', 'A dense, slightly stale loaf of bread.', 'food', null, 0.5, 3, 'common', 1, 10, JSON.stringify({ heal: 10 }), '["food","starter"]');
-insertItem.run(items.dried_fish, 'dried_fish', 'Dried Fish', 'Salt-dried fish that keeps well.', 'food', null, 0.3, 5, 'common', 1, 10, JSON.stringify({ heal: 15 }), '["food"]');
-insertItem.run(items.coconut, 'coconut', 'Coconut', 'A fresh coconut full of sweet water.', 'food', null, 0.8, 4, 'common', 1, 5, JSON.stringify({ heal: 12, stamina: 10 }), '["food","tropical"]');
-insertItem.run(items.rice_ball, 'rice_ball', 'Rice Ball', 'A ball of sticky rice wrapped in a leaf.', 'food', null, 0.3, 3, 'common', 1, 10, JSON.stringify({ heal: 10 }), '["food"]');
-insertItem.run(items.spiced_curry, 'spiced_curry', 'Spiced Curry', 'A bowl of rich, fragrant curry.', 'food', null, 0.5, 12, 'uncommon', 0, 1, JSON.stringify({ heal: 30, stamina: 20 }), '["food","cooked"]');
-insertItem.run(items.mango, 'mango', 'Ripe Mango', 'A sweet, ripe mango.', 'food', null, 0.3, 2, 'common', 1, 10, JSON.stringify({ heal: 8 }), '["food","tropical","forage"]');
+insertItem.run(items.bread_loaf, 'bread_loaf', 'Loaf of Bread', 'A dense, slightly stale loaf of bread.', 'food', null, 0.5, 3, 'common', 1, 10, JSON.stringify({ heal: 10 }), '["food","starter"]', 1, 0);
+insertItem.run(items.dried_fish, 'dried_fish', 'Dried Fish', 'Salt-dried fish that keeps well.', 'food', null, 0.3, 5, 'common', 1, 10, JSON.stringify({ heal: 15 }), '["food"]', 1, 0);
+insertItem.run(items.coconut, 'coconut', 'Coconut', 'A fresh coconut full of sweet water.', 'food', null, 0.8, 4, 'common', 1, 5, JSON.stringify({ heal: 12, stamina: 10 }), '["food","tropical"]', 1, 0);
+insertItem.run(items.rice_ball, 'rice_ball', 'Rice Ball', 'A ball of sticky rice wrapped in a leaf.', 'food', null, 0.3, 3, 'common', 1, 10, JSON.stringify({ heal: 10 }), '["food"]', 1, 0);
+insertItem.run(items.spiced_curry, 'spiced_curry', 'Spiced Curry', 'A bowl of rich, fragrant curry.', 'food', null, 0.5, 12, 'uncommon', 0, 1, JSON.stringify({ heal: 30, stamina: 20 }), '["food","cooked"]', 1, 0);
+insertItem.run(items.mango, 'mango', 'Ripe Mango', 'A sweet, ripe mango.', 'food', null, 0.3, 2, 'common', 1, 10, JSON.stringify({ heal: 8 }), '["food","tropical","forage"]', 1, 0);
 
 // Resources
-insertItem.run(items.cinnamon_bark, 'cinnamon_bark', 'Cinnamon Bark', 'A curl of fragrant cinnamon bark.', 'resource', null, 0.1, 8, 'common', 1, 50, '{}', '["spice","trade","forage"]');
-insertItem.run(items.wild_herbs, 'wild_herbs', 'Wild Herbs', 'A bundle of assorted wild herbs.', 'resource', null, 0.2, 3, 'common', 1, 50, '{}', '["herb","forage"]');
-insertItem.run(items.jungle_vine, 'jungle_vine', 'Jungle Vine', 'A strong, flexible vine.', 'resource', null, 0.5, 2, 'common', 1, 20, '{}', '["fiber","forage"]');
-insertItem.run(items.rough_timber, 'rough_timber', 'Rough Timber', 'An unfinished length of tropical wood.', 'resource', null, 5.0, 5, 'common', 1, 20, '{}', '["wood"]');
-insertItem.run(items.iron_ore, 'iron_ore', 'Iron Ore', 'A chunk of raw iron ore.', 'resource', null, 4.0, 10, 'common', 1, 20, '{}', '["ore","metal"]');
-insertItem.run(items.copper_nugget, 'copper_nugget', 'Copper Nugget', 'A small nugget of copper.', 'resource', null, 1.0, 6, 'common', 1, 20, '{}', '["ore","metal"]');
+insertItem.run(items.cinnamon_bark, 'cinnamon_bark', 'Cinnamon Bark', 'A curl of fragrant cinnamon bark.', 'resource', null, 0.1, 8, 'common', 1, 50, '{}', '["spice","trade","forage"]', 1, 0);
+insertItem.run(items.wild_herbs, 'wild_herbs', 'Wild Herbs', 'A bundle of assorted wild herbs.', 'resource', null, 0.2, 3, 'common', 1, 50, '{}', '["herb","forage"]', 1, 0);
+insertItem.run(items.jungle_vine, 'jungle_vine', 'Jungle Vine', 'A strong, flexible vine.', 'resource', null, 0.5, 2, 'common', 1, 20, '{}', '["fiber","forage"]', 1, 0);
+insertItem.run(items.rough_timber, 'rough_timber', 'Rough Timber', 'An unfinished length of tropical wood.', 'resource', null, 5.0, 5, 'common', 1, 20, '{}', '["wood"]', 5, 0);
+insertItem.run(items.iron_ore, 'iron_ore', 'Iron Ore', 'A chunk of raw iron ore.', 'resource', null, 4.0, 10, 'common', 1, 20, '{}', '["ore","metal"]', 4, 0);
+insertItem.run(items.copper_nugget, 'copper_nugget', 'Copper Nugget', 'A small nugget of copper.', 'resource', null, 1.0, 6, 'common', 1, 20, '{}', '["ore","metal"]', 2, 0);
 
 // Fish
-insertItem.run(items.small_fish, 'small_fish', 'Small Fish', 'A small silver-scaled fish.', 'food', null, 0.5, 4, 'common', 1, 10, JSON.stringify({ heal: 8 }), '["fish","food"]');
-insertItem.run(items.reef_fish, 'reef_fish', 'Reef Fish', 'A colorful reef fish.', 'food', null, 0.8, 8, 'common', 1, 10, JSON.stringify({ heal: 12 }), '["fish","food"]');
-insertItem.run(items.large_grouper, 'large_grouper', 'Large Grouper', 'A heavy grouper — good eating.', 'food', null, 3.0, 20, 'uncommon', 0, 1, JSON.stringify({ heal: 25 }), '["fish","food","rare_catch"]');
+insertItem.run(items.small_fish, 'small_fish', 'Small Fish', 'A small silver-scaled fish.', 'food', null, 0.5, 4, 'common', 1, 10, JSON.stringify({ heal: 8 }), '["fish","food"]', 1, 0);
+insertItem.run(items.reef_fish, 'reef_fish', 'Reef Fish', 'A colorful reef fish.', 'food', null, 0.8, 8, 'common', 1, 10, JSON.stringify({ heal: 12 }), '["fish","food"]', 1, 0);
+insertItem.run(items.large_grouper, 'large_grouper', 'Large Grouper', 'A heavy grouper — good eating.', 'food', null, 3.0, 20, 'uncommon', 0, 1, JSON.stringify({ heal: 25 }), '["fish","food","rare_catch"]', 3, 0);
 
 // Tools
-insertItem.run(items.fishing_line, 'fishing_line', 'Fishing Line', 'A simple line with a bone hook.', 'tool', null, 0.2, 8, 'common', 0, 1, '{}', '["tool","fishing","starter"]');
-insertItem.run(items.pickaxe, 'pickaxe', 'Pickaxe', 'A sturdy iron pickaxe for mining.', 'tool', null, 4.0, 30, 'common', 0, 1, '{}', '["tool","mining"]');
-insertItem.run(items.bandage, 'bandage', 'Cloth Bandage', 'A strip of clean cloth for binding wounds.', 'medicine', null, 0.1, 5, 'common', 1, 10, JSON.stringify({ heal: 20 }), '["medicine"]');
-insertItem.run(items.herbal_tonic, 'herbal_tonic', 'Herbal Tonic', 'A bitter herbal remedy.', 'medicine', null, 0.3, 15, 'uncommon', 1, 5, JSON.stringify({ heal: 40 }), '["medicine","alchemy"]');
-insertItem.run(items.ledger_book, 'ledger_book', 'Ledger Book', 'A leather-bound ledger for accounts.', 'misc', null, 1.0, 10, 'common', 0, 1, '{}', '["book","starter"]');
+insertItem.run(items.fishing_line, 'fishing_line', 'Fishing Line', 'A simple line with a bone hook.', 'tool', null, 0.2, 8, 'common', 0, 1, '{}', '["tool","fishing","starter"]', 1, 0);
+insertItem.run(items.pickaxe, 'pickaxe', 'Pickaxe', 'A sturdy iron pickaxe for mining.', 'tool', null, 4.0, 30, 'common', 0, 1, '{}', '["tool","mining"]', 4, 0);
+insertItem.run(items.bandage, 'bandage', 'Cloth Bandage', 'A strip of clean cloth for binding wounds.', 'medicine', null, 0.1, 5, 'common', 1, 10, JSON.stringify({ heal: 20 }), '["medicine"]', 1, 0);
+insertItem.run(items.herbal_tonic, 'herbal_tonic', 'Herbal Tonic', 'A bitter herbal remedy.', 'medicine', null, 0.3, 15, 'uncommon', 1, 5, JSON.stringify({ heal: 40 }), '["medicine","alchemy"]', 1, 0);
+insertItem.run(items.ledger_book, 'ledger_book', 'Ledger Book', 'A leather-bound ledger for accounts.', 'misc', null, 1.0, 10, 'common', 0, 1, '{}', '["book","starter"]', 2, 0);
 
 // Loot items
-insertItem.run(items.rat_tail, 'rat_tail', 'Rat Tail', 'A greasy rat tail. Someone might buy this.', 'resource', null, 0.1, 1, 'common', 1, 50, '{}', '["loot","vermin"]');
-insertItem.run(items.boar_hide, 'boar_hide', 'Boar Hide', 'A rough boar hide. Useful for leatherworking.', 'resource', null, 2.0, 8, 'common', 1, 10, '{}', '["loot","leather","hide"]');
-insertItem.run(items.boar_meat, 'boar_meat', 'Boar Meat', 'A cut of wild boar meat.', 'food', null, 1.5, 6, 'common', 1, 10, JSON.stringify({ heal: 15 }), '["food","meat","loot"]');
-insertItem.run(items.snake_fang, 'snake_fang', 'Snake Fang', 'A curved venomous fang.', 'resource', null, 0.1, 12, 'uncommon', 1, 20, '{}', '["loot","alchemy"]');
-insertItem.run(items.monkey_paw, 'monkey_paw', 'Monkey Paw', 'A small dried monkey paw. Considered lucky by some.', 'resource', null, 0.1, 15, 'uncommon', 1, 5, '{}', '["loot","curio"]');
+insertItem.run(items.rat_tail, 'rat_tail', 'Rat Tail', 'A greasy rat tail. Someone might buy this.', 'resource', null, 0.1, 1, 'common', 1, 50, '{}', '["loot","vermin"]', 1, 0);
+insertItem.run(items.boar_hide, 'boar_hide', 'Boar Hide', 'A rough boar hide. Useful for leatherworking.', 'resource', null, 2.0, 8, 'common', 1, 10, '{}', '["loot","leather","hide"]', 3, 0);
+insertItem.run(items.boar_meat, 'boar_meat', 'Boar Meat', 'A cut of wild boar meat.', 'food', null, 1.5, 6, 'common', 1, 10, JSON.stringify({ heal: 15 }), '["food","meat","loot"]', 2, 0);
+insertItem.run(items.snake_fang, 'snake_fang', 'Snake Fang', 'A curved venomous fang.', 'resource', null, 0.1, 12, 'uncommon', 1, 20, '{}', '["loot","alchemy"]', 1, 0);
+insertItem.run(items.monkey_paw, 'monkey_paw', 'Monkey Paw', 'A small dried monkey paw. Considered lucky by some.', 'resource', null, 0.1, 15, 'uncommon', 1, 5, '{}', '["loot","curio"]', 1, 0);
 
 // ==================== CREATURES ====================
 insertCreature.run(creatures.dock_rat, 'Dock Rat', 'A large, mangy rat that haunts the waterfront.', 1, 12, 1, 3, 0, 50, 5, 2.5, 'aggressive', JSON.stringify([{ item_id: items.rat_tail, chance: 0.6, quantity: 1 }]), 8, '["urban","harbor"]');
@@ -505,12 +508,13 @@ if (existingChars.length > 0) console.log(`Granted starter clothing to ${existin
 
 // Create admin account
 const bcrypt = require('bcryptjs');
-const adminExists = db.prepare('SELECT id FROM accounts WHERE username = ?').get('admin');
+const adminEmail = process.env.ADMIN_EMAIL || 'admin@ceylon1802.local';
+const adminExists = db.prepare('SELECT id FROM accounts WHERE email = ?').get(adminEmail);
 if (!adminExists) {
   const { v4: uuid } = require('uuid');
-  db.prepare('INSERT INTO accounts (id, username, password_hash, is_admin) VALUES (?, ?, ?, 1)')
-    .run(uuid(), 'admin', bcrypt.hashSync('ceylon1802', 10));
-  console.log('Admin account created — username: admin, password: ceylon1802');
+  db.prepare('INSERT INTO accounts (id, email, password_hash, is_admin) VALUES (?, ?, ?, 1)')
+    .run(uuid(), adminEmail, bcrypt.hashSync('ceylon1802', 10));
+  console.log(`Admin account created — email: ${adminEmail}, password: ceylon1802`);
 }
 
 db.pragma('foreign_keys = ON'); // restore for server runtime

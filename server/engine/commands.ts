@@ -90,10 +90,7 @@ function formatRoom(room: any, exits: any[], gates: any[], npcs: any[], players:
   let text = `\n**${room.title}**\n`;
   text += `${room.description_long}\n`;
 
-  // Exits (cardinal — within region)
-  const exitDirs = exits.map(e => e.direction);
-  if (exitDirs.length > 0) text += `\n*Exits: ${exitDirs.join(', ')}*\n`;
-  // Gates (cross-region: go forge, go door, go grove, etc.)
+  // Gates (cross-region doors) — shown right after description as "You also see: ..."
   if (gates.length > 0) {
     const gateLabels: string[] = [];
     const doorGates: any[] = [];
@@ -103,24 +100,23 @@ function formatRoom(room: any, exits: any[], gates: any[], npcs: any[], players:
       const label = keywords.find((k: string) => k !== 'door' && k !== 'back' && k !== 'out') || keywords[0];
       if (label) gateLabels.push(label);
     }
-    let gateText = `*Doors: ${gateLabels.join(', ')}*`;
+    let gateText = `You also see: ${gateLabels.join(', ')}`;
     if (doorGates.length > 1) gateText += ` *(${doorGates.length} doors — go first door, go second door…)*`;
     text += gateText + '\n';
   }
 
-  // Also here: NPCs, creatures, other players
+  // Exits (cardinal — within region)
+  const exitDirs = exits.map(e => e.direction);
+  if (exitDirs.length > 0) text += `*Exits: ${exitDirs.join(', ')}*\n`;
+
+  // Also here: NPCs, creatures, other players (single comma-separated line after exits)
   const otherPlayers = players.filter(p => p.characterId !== currentPlayerId);
-  if (npcs.length > 0 || creatures.length > 0 || otherPlayers.length > 0) {
-    text += `\n*Also here:*\n`;
-    for (const npc of npcs) {
-      text += `  ${npc.name} (${npc.role})\n`;
-    }
-    for (const c of creatures) {
-      text += `  A **${c.name}**\n`;
-    }
-    for (const p of otherPlayers) {
-      text += `  **${p.characterName}**\n`;
-    }
+  const alsoHere: string[] = [];
+  for (const npc of npcs) alsoHere.push(npc.name);
+  for (const c of creatures) alsoHere.push(`A **${c.name}**`);
+  for (const p of otherPlayers) alsoHere.push(`**${p.characterName}**`);
+  if (alsoHere.length > 0) {
+    text += `\n*Also here:* ${alsoHere.join(', ')}\n`;
   }
 
   // Items on the ground
@@ -171,6 +167,32 @@ function cmdLook(player: OnlinePlayer, args: string[], send: SendFn, broadcast: 
 
   if (args.length > 0) {
     const target = args.join(' ').toLowerCase();
+
+    // "look in <container>" — show contents of a container you have
+    const inMatch = target.match(/^in(?:side)?\s+(.+)$/);
+    if (inMatch) {
+      const containerName = inMatch[1].trim();
+      const container = db.prepare(`
+        SELECT inv.id, i.name, i.container_slots FROM inventory inv JOIN items i ON inv.item_id = i.id
+        WHERE inv.character_id = ? AND lower(i.name) LIKE ? AND i.container_slots > 0 LIMIT 1
+      `).get(player.characterId, `%${containerName}%`) as any;
+      if (!container) { send(player.characterId, { type: 'error', content: `You don't have a container called "${containerName}".` }); return; }
+      const contents = db.prepare(`
+        SELECT i.name, i.size, inv.quantity FROM inventory inv JOIN items i ON inv.item_id = i.id
+        WHERE inv.character_id = ? AND inv.container_id = ?
+      `).all(player.characterId, container.id) as any[];
+      const usedSlots = contents.reduce((sum: number, c: any) => sum + (c.size || 1) * (c.quantity || 1), 0);
+      let text = `**${container.name}** (${usedSlots}/${container.container_slots} slots used):\n`;
+      if (contents.length === 0) {
+        text += '  Empty.\n';
+      } else {
+        for (const c of contents) {
+          text += `  ${c.name}${c.quantity > 1 ? ` (x${c.quantity})` : ''} [size ${c.size || 1}]\n`;
+        }
+      }
+      send(player.characterId, { type: 'text', content: text });
+      return;
+    }
 
     // Look at yourself
     if (target === 'self' || target === 'me' || target === 'myself' || target === player.characterName.toLowerCase()) {
@@ -422,7 +444,8 @@ function cmdWhisper(player: OnlinePlayer, args: string[], send: SendFn, broadcas
 // INVENTORY command
 function cmdInventory(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
   const items = db.prepare(`
-    SELECT i.name, i.category, inv.quantity, inv.equipped, inv.equipped_slot, inv.durability, inv.id as inv_id
+    SELECT i.name, i.category, inv.quantity, inv.equipped, inv.equipped_slot, inv.durability, inv.id as inv_id,
+           i.container_slots, i.size
     FROM inventory inv JOIN items i ON inv.item_id = i.id
     WHERE inv.character_id = ? AND inv.container_id IS NULL
     ORDER BY inv.equipped DESC, i.category, i.name
@@ -449,14 +472,48 @@ function cmdInventory(player: OnlinePlayer, args: string[], send: SendFn, broadc
   if (worn.length > 0) {
     text += '\n*Wearing:*\n';
     for (const item of worn) {
-      text += `  [${item.equipped_slot}] ${item.name}\n`;
+      let line = `  [${item.equipped_slot}] ${item.name}`;
+      if (item.container_slots > 0) {
+        const contents = db.prepare(`
+          SELECT i.name, i.size, inv.quantity FROM inventory inv JOIN items i ON inv.item_id = i.id
+          WHERE inv.character_id = ? AND inv.container_id = ?
+        `).all(player.characterId, item.inv_id) as any[];
+        const usedSlots = contents.reduce((s: number, c: any) => s + (c.size || 1) * (c.quantity || 1), 0);
+        line += ` (${usedSlots}/${item.container_slots} slots)`;
+        if (contents.length > 0) {
+          line += '\n';
+          for (const c of contents) {
+            line += `    └ ${c.name}${c.quantity > 1 ? ` (x${c.quantity})` : ''}\n`;
+          }
+          text += line;
+          continue;
+        }
+      }
+      text += line + '\n';
     }
   }
 
   if (carried.length > 0) {
     text += '\n*Carried:*\n';
     for (const item of carried) {
-      text += `  ${item.name}${item.quantity > 1 ? ` (x${item.quantity})` : ''} (${item.category})\n`;
+      let line = `  ${item.name}${item.quantity > 1 ? ` (x${item.quantity})` : ''}`;
+      if (item.container_slots > 0) {
+        const contents = db.prepare(`
+          SELECT i.name, i.size, inv.quantity FROM inventory inv JOIN items i ON inv.item_id = i.id
+          WHERE inv.character_id = ? AND inv.container_id = ?
+        `).all(player.characterId, item.inv_id) as any[];
+        const usedSlots = contents.reduce((s: number, c: any) => s + (c.size || 1) * (c.quantity || 1), 0);
+        line += ` (${usedSlots}/${item.container_slots} slots)`;
+        if (contents.length > 0) {
+          line += '\n';
+          for (const c of contents) {
+            line += `    └ ${c.name}${c.quantity > 1 ? ` (x${c.quantity})` : ''}\n`;
+          }
+          text += line;
+          continue;
+        }
+      }
+      text += line + '\n';
     }
   }
 
@@ -464,7 +521,13 @@ function cmdInventory(player: OnlinePlayer, args: string[], send: SendFn, broadc
 }
 
 function pickUpItem(player: OnlinePlayer, groundId: string, itemId: string, itemName: string, quantity: number, send: SendFn, broadcast: BroadcastFn): void {
-  const item = db.prepare('SELECT slot FROM items WHERE id = ?').get(itemId) as any;
+  const item = db.prepare('SELECT slot, size FROM items WHERE id = ?').get(itemId) as any;
+  const itemSize = item?.size || 1;
+  const char = getCharacter(player.characterId);
+  if (char && itemSize > char.strength) {
+    send(player.characterId, { type: 'error', content: `${itemName} is too heavy for you to carry. (size ${itemSize}, your strength is ${char.strength})` });
+    return;
+  }
   db.prepare('DELETE FROM room_items WHERE id = ?').run(groundId);
   if (item?.slot === 'hand') {
     const hand = freeHand(player.characterId);
@@ -498,10 +561,10 @@ function cmdGet(player: OnlinePlayer, args: string[], send: SendFn, broadcast: B
     const targetItem = fromMatch[1].trim();
     const containerName = fromMatch[2].trim();
     const container = db.prepare(`
-      SELECT inv.id FROM inventory inv JOIN items i ON inv.item_id = i.id
-      WHERE inv.character_id = ? AND lower(i.name) LIKE ? LIMIT 1
+      SELECT inv.id, i.name, i.container_slots FROM inventory inv JOIN items i ON inv.item_id = i.id
+      WHERE inv.character_id = ? AND lower(i.name) LIKE ? AND i.container_slots > 0 LIMIT 1
     `).get(player.characterId, `%${containerName}%`) as any;
-    if (!container) { send(player.characterId, { type: 'error', content: `You don't have a "${fromMatch[2].trim()}".` }); return; }
+    if (!container) { send(player.characterId, { type: 'error', content: `You don't have a container called "${fromMatch[2].trim()}".` }); return; }
     const inside = db.prepare(`
       SELECT inv.id, inv.item_id, inv.quantity, i.name, i.slot FROM inventory inv JOIN items i ON inv.item_id = i.id
       WHERE inv.character_id = ? AND inv.container_id = ? AND lower(i.name) LIKE ? LIMIT 1
@@ -570,6 +633,19 @@ function cmdDrop(player: OnlinePlayer, args: string[], send: SendFn, broadcast: 
     || pickByOrdinal(allInv, r => r.name.toLowerCase().includes(namePart), ordinal);
 
   if (!invItem) { send(player.characterId, { type: 'error', content: `You don't have "${raw}".` }); return; }
+
+  // If dropping a container, spill its contents into the player's pack
+  const contentsInside = db.prepare(`
+    SELECT inv.id, i.name FROM inventory inv JOIN items i ON inv.item_id = i.id
+    WHERE inv.character_id = ? AND inv.container_id = ?
+  `).all(player.characterId, invItem.id) as any[];
+  if (contentsInside.length > 0) {
+    db.prepare('UPDATE inventory SET container_id = NULL WHERE character_id = ? AND container_id = ?')
+      .run(player.characterId, invItem.id);
+    const names = contentsInside.map((c: any) => c.name).join(', ');
+    send(player.characterId, { type: 'text', content: `The contents of ${invItem.name} spill out: ${names}.` });
+  }
+
   db.prepare('DELETE FROM inventory WHERE id = ?').run(invItem.id);
   db.prepare('INSERT INTO room_items (id, room_id, item_id, quantity) VALUES (?, ?, ?, ?)')
     .run(uuid(), player.roomId, invItem.item_id, invItem.quantity || 1);
@@ -621,15 +697,67 @@ function cmdEquip(player: OnlinePlayer, args: string[], send: SendFn, broadcast:
 
   if (invItem.slot === 'hand') {
     const hand = freeHand(player.characterId);
-    if (!hand) { send(player.characterId, { type: 'error', content: 'Your hands are full. Drop something first.' }); return; }
+    if (!hand) { send(player.characterId, { type: 'error', content: 'Your hands are full. Unequip something first.' }); return; }
     db.prepare('UPDATE inventory SET equipped = 1, equipped_slot = ? WHERE id = ?').run(hand, invItem.id);
     const handLabel = hand === 'right_hand' ? 'right hand' : 'left hand';
     send(player.characterId, { type: 'text', content: `You hold ${invItem.name} in your ${handLabel}.` });
   } else {
-    db.prepare('UPDATE inventory SET equipped = 0, equipped_slot = NULL WHERE character_id = ? AND equipped_slot = ?')
-      .run(player.characterId, invItem.slot);
+    const existing = db.prepare(`
+      SELECT inv.id, i.name FROM inventory inv JOIN items i ON inv.item_id = i.id
+      WHERE inv.character_id = ? AND inv.equipped_slot = ?
+    `).get(player.characterId, invItem.slot) as any;
+    if (existing) {
+      db.prepare('UPDATE inventory SET equipped = 0, equipped_slot = NULL WHERE id = ?').run(existing.id);
+      send(player.characterId, { type: 'text', content: `You remove ${existing.name}.` });
+    }
     db.prepare('UPDATE inventory SET equipped = 1, equipped_slot = ? WHERE id = ?').run(invItem.slot, invItem.id);
-    send(player.characterId, { type: 'text', content: `You equip ${invItem.name} (${invItem.slot}).` });
+    const slotLabels: Record<string, string> = { torso: 'torso', head: 'head', feet: 'feet', legs: 'legs', back: 'back' };
+    send(player.characterId, { type: 'text', content: `You wear ${invItem.name} (${slotLabels[invItem.slot] || invItem.slot}).` });
+  }
+}
+
+// PUT command — "put X in Y" to place an item inside a container you own
+function cmdPut(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
+  if (args.length === 0) { send(player.characterId, { type: 'error', content: 'Put what where? Usage: put <item> in <container>' }); return; }
+  const raw = args.join(' ').toLowerCase();
+  const inMatch = raw.match(/^(.+?)\s+in\s+(.+)$/);
+  if (!inMatch) { send(player.characterId, { type: 'error', content: 'Usage: put <item> in <container>' }); return; }
+
+  const itemName = inMatch[1].trim();
+  const containerName = inMatch[2].trim();
+
+  const container = db.prepare(`
+    SELECT inv.id, inv.item_id, i.name, i.container_slots FROM inventory inv JOIN items i ON inv.item_id = i.id
+    WHERE inv.character_id = ? AND lower(i.name) LIKE ? AND i.container_slots > 0 LIMIT 1
+  `).get(player.characterId, `%${containerName}%`) as any;
+  if (!container) { send(player.characterId, { type: 'error', content: `You don't have a container called "${inMatch[2].trim()}".` }); return; }
+
+  const allInv = db.prepare(`
+    SELECT inv.id, inv.item_id, inv.equipped, inv.container_id, i.name, i.size FROM inventory inv JOIN items i ON inv.item_id = i.id
+    WHERE inv.character_id = ? AND inv.id != ?
+  `).all(player.characterId, container.id) as any[];
+  const { ordinal, rest } = parseOrdinal(itemName);
+  const namePart = rest || itemName;
+  const invItem = pickByOrdinal(allInv, r => r.name.toLowerCase().includes(namePart) && !r.container_id, ordinal);
+  if (!invItem) { send(player.characterId, { type: 'error', content: `You don't have "${inMatch[1].trim()}" to put away.` }); return; }
+  if (invItem.id === container.id) { send(player.characterId, { type: 'error', content: `You can't put something inside itself.` }); return; }
+
+  const usedSlots = db.prepare(`
+    SELECT COALESCE(SUM(i.size), 0) as used FROM inventory inv JOIN items i ON inv.item_id = i.id
+    WHERE inv.character_id = ? AND inv.container_id = ?
+  `).get(player.characterId, container.id) as any;
+  const itemSize = invItem.size || 1;
+  if ((usedSlots?.used || 0) + itemSize > container.container_slots) {
+    send(player.characterId, { type: 'error', content: `Not enough room in ${container.name}. (${usedSlots?.used || 0}/${container.container_slots} slots used, item needs ${itemSize})` });
+    return;
+  }
+
+  if (invItem.equipped) {
+    db.prepare('UPDATE inventory SET equipped = 0, equipped_slot = NULL, container_id = ? WHERE id = ?').run(container.id, invItem.id);
+    send(player.characterId, { type: 'text', content: `You unequip ${invItem.name} and put it in your ${container.name}.` });
+  } else {
+    db.prepare('UPDATE inventory SET container_id = ? WHERE id = ?').run(container.id, invItem.id);
+    send(player.characterId, { type: 'text', content: `You put ${invItem.name} in your ${container.name}.` });
   }
 }
 
@@ -1176,12 +1304,13 @@ function cmdHelp(player: OnlinePlayer, args: string[], send: SendFn, broadcast: 
 **Movement:** north/n, south/s, east/e, west/w, up/u, down/d, ne, nw, se, sw
 **Doors:** go <place>, go door, go first door, go second door…
 **Interact:** enter <place>, climb <object>, open <object>
-**Actions:** look [target], talk <npc>, buy <item>, sell <item>, forage, fish
+**Actions:** look [target], peer <exit/door>, talk <npc>, buy <item>, sell <item>, forage, fish
 **Combat:** attack [target], flee, defend
 **Items:** inventory/inv, get <item>, drop <item>, equip <item>, unequip <item>
+**Containers:** look in <container>, put <item> in <container>, get <item> from <container>
 **Social:** "message" or 'message' (say out loud), say <msg>, whisper <name> <msg>, party invite/leave/list, who
 **Info:** status, skills, quests, accept <quest>, help, map
-**Admin:** /admin (if authorized)`;
+**Other:** invite <email>, report <player> <reason>`;
 
   send(player.characterId, { type: 'system', content: text });
 }
@@ -1468,6 +1597,122 @@ function handlePlayerDefeat(player: OnlinePlayer, send: SendFn, broadcast: Broad
   cmdLook(player, [], send, broadcast);
 }
 
+// INVITE command — send an email invite to another player
+function cmdInvite(player: OnlinePlayer, args: string[], send: SendFn, broadcast: BroadcastFn): void {
+  const email = args[0]?.trim().toLowerCase();
+  if (!email || !email.includes('@')) {
+    send(player.characterId, { type: 'error', content: 'Usage: **invite email@example.com**' });
+    return;
+  }
+  const existingAccount = db.prepare('SELECT id FROM accounts WHERE email = ?').get(email);
+  if (existingAccount) {
+    send(player.characterId, { type: 'error', content: 'That email already has an account.' });
+    return;
+  }
+  const existingInvite = db.prepare('SELECT id FROM invites WHERE email = ? AND accepted = 0').get(email);
+  if (existingInvite) {
+    send(player.characterId, { type: 'system', content: 'An invite has already been sent to that email.' });
+    return;
+  }
+  const token = uuid();
+  db.prepare('INSERT INTO invites (id, email, token, invited_by) VALUES (?, ?, ?, ?)').run(uuid(), email, token, player.characterId);
+
+  // Send the email asynchronously
+  const { sendInviteEmail } = require('../email');
+  sendInviteEmail(email, token, player.characterName).then((ok: boolean) => {
+    if (ok) {
+      send(player.characterId, { type: 'system', content: `Invite sent to **${email}**!` });
+    } else {
+      send(player.characterId, { type: 'error', content: `Failed to send invite email. Check server email configuration.` });
+    }
+  });
+}
+
+// REPORT command — report another player
+function cmdReport(player: OnlinePlayer, args: string[], send: SendFn, _broadcast: BroadcastFn): void {
+  if (args.length < 2) {
+    send(player.characterId, { type: 'error', content: 'Usage: **report <player name> <reason>**' });
+    return;
+  }
+  const targetName = args[0];
+  const reason = args.slice(1).join(' ').trim();
+  if (!reason) {
+    send(player.characterId, { type: 'error', content: 'Please include a reason for the report.' });
+    return;
+  }
+
+  const target = db.prepare('SELECT id, account_id, name FROM characters WHERE LOWER(name) = ?').get(targetName.toLowerCase()) as any;
+  if (!target) {
+    send(player.characterId, { type: 'error', content: `No player named "${targetName}" found.` });
+    return;
+  }
+  if (target.id === player.characterId) {
+    send(player.characterId, { type: 'error', content: 'You cannot report yourself.' });
+    return;
+  }
+
+  db.prepare('INSERT INTO reports (id, reporter_character_id, target_account_id, target_character_name, reason) VALUES (?, ?, ?, ?, ?)')
+    .run(uuid(), player.characterId, target.account_id, target.name, reason);
+
+  send(player.characterId, { type: 'system', content: `Your report against **${target.name}** has been submitted. Thank you.` });
+}
+
+// PEER command — look through an exit/door and print the room description in the game log
+function cmdPeer(player: OnlinePlayer, args: string[], send: SendFn, _broadcast: BroadcastFn): void {
+  const input = args.join(' ').trim().toLowerCase();
+  if (!input) {
+    send(player.characterId, { type: 'error', content: 'Peer where? (e.g. **peer north**, **peer door**)' });
+    return;
+  }
+
+  let toRoomId: string | null = null;
+
+  // 1) Try cardinal exit
+  const direction = DIR_ALIASES[input] || input;
+  const exits = getRoomExits(player.roomId);
+  const exit = exits.find((e: any) => e.direction === direction);
+  if (exit) {
+    toRoomId = exit.to_room_id;
+  }
+
+  // 2) Try gate keyword
+  if (!toRoomId) {
+    const gatePhrase = args.join(' ').toLowerCase().trim();
+    const { ordinal, rest: basePhrase } = parseOrdinal(gatePhrase);
+    const searchPhrase = basePhrase || gatePhrase;
+    const gates = getRoomGates(player.roomId);
+    const matchingGates = gates.filter((g: any) => {
+      const keywords = (g.keywords || '').split(',').map((k: string) => k.trim().toLowerCase()).filter(Boolean);
+      return keywords.some((k: string) => k === searchPhrase || searchPhrase.includes(k) || k.includes(searchPhrase));
+    });
+    if (matchingGates.length === 0) {
+      const exactGate = gates.find((g: any) => {
+        const keywords = (g.keywords || '').split(',').map((k: string) => k.trim().toLowerCase()).filter(Boolean);
+        return keywords.some((k: string) => k === gatePhrase || gatePhrase.includes(k) || k.includes(gatePhrase));
+      });
+      if (exactGate) toRoomId = exactGate.to_room_id;
+    } else {
+      const idx = ordinal != null ? ordinal - 1 : 0;
+      const gate = matchingGates[idx];
+      if (gate) toRoomId = gate.to_room_id;
+    }
+  }
+
+  if (!toRoomId) {
+    send(player.characterId, { type: 'error', content: "You don't see that exit or door here." });
+    return;
+  }
+
+  const room = getRoomData(toRoomId) as any;
+  if (!room) {
+    send(player.characterId, { type: 'error', content: 'You cannot make out what lies that way.' });
+    return;
+  }
+
+  const desc = room.description_long || room.description_short || '(Nothing notable.)';
+  send(player.characterId, { type: 'text', content: `*Peering through:*\n\n**${room.title}**\n${desc}` });
+}
+
 // Command registry
 const COMMANDS: Record<string, CommandHandler> = {
   look: cmdLook, l: cmdLook,
@@ -1476,6 +1721,7 @@ const COMMANDS: Record<string, CommandHandler> = {
   inventory: cmdInventory, inv: cmdInventory, i: cmdInventory,
   get: cmdGet, take: cmdGet,
   drop: cmdDrop,
+  put: cmdPut, stash: cmdPut, store: cmdPut,
   equip: cmdEquip, wear: cmdEquip, wield: cmdEquip,
   unequip: cmdUnequip, remove: cmdUnequip,
   status: cmdStatus, score: cmdStatus, stat: cmdStatus,
@@ -1496,6 +1742,9 @@ const COMMANDS: Record<string, CommandHandler> = {
   who: cmdWho,
   map: cmdMap,
   party: cmdParty, group: cmdParty,
+  invite: cmdInvite,
+  report: cmdReport,
+  peer: cmdPeer,
 };
 
 // Add direction commands
@@ -1506,6 +1755,9 @@ for (const [alias, dir] of Object.entries(DIR_ALIASES)) {
 }
 COMMANDS['go'] = cmdMove;
 COMMANDS['move'] = cmdMove;
+// Ensure peer is registered (defensive; avoids stale bundles missing the key)
+COMMANDS.peer = cmdPeer;
+COMMANDS.glance = cmdPeer;
 
 export function processCommand(input: string, player: OnlinePlayer, send: SendFn, broadcast: BroadcastFn): void {
   const trimmed = input.trim();
@@ -1559,12 +1811,17 @@ export function processCommand(input: string, player: OnlinePlayer, send: SendFn
   }
 
   const parts = trimmed.split(/\s+/);
-  const cmd = parts[0].toLowerCase();
+  const cmd = parts[0]
+    .toLowerCase()
+    .replace(/^\ufeff/, '')
+    .replace(/^\/+/, '');
   const args = parts.slice(1);
 
   const handler = COMMANDS[cmd];
   if (handler) {
     handler(player, args, send, broadcast);
+  } else if (cmd === 'peer' || cmd === 'glance') {
+    cmdPeer(player, args, send, broadcast);
   } else {
     send(player.characterId, { type: 'error', content: `Unknown command: "${cmd}". Type "help" for commands.` });
   }

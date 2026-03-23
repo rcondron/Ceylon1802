@@ -16,19 +16,11 @@
       <p class="subtitle">A Text Adventure in the Age of Spice</p>
 
       <div id="auth-login" class="auth-panel">
-        <input type="text" id="login-username" placeholder="Username" autocomplete="username" maxlength="20">
+        <input type="email" id="login-email" placeholder="Email" autocomplete="email">
         <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
         <button id="btn-login" class="btn-primary">Enter Game</button>
-        <button id="btn-show-register" class="btn-link">Create Account</button>
+        <p class="auth-hint">Need an account? Ask a player to <strong>invite</strong> you.</p>
         <div id="login-error" class="error-msg"></div>
-      </div>
-
-      <div id="auth-register" class="auth-panel hidden">
-        <input type="text" id="reg-username" placeholder="Username" autocomplete="username" maxlength="20">
-        <input type="password" id="reg-password" placeholder="Password (4+ chars)" autocomplete="new-password">
-        <button id="btn-register" class="btn-primary">Create Account</button>
-        <button id="btn-show-login" class="btn-link">Back to Login</button>
-        <div id="reg-error" class="error-msg"></div>
       </div>
     </div>
   </div>
@@ -39,7 +31,11 @@
       <h2>Choose Your Character</h2>
       <div id="character-list"></div>
 
-      <div id="character-create" class="char-create">
+      <div id="character-create-link" style="display:none;margin-top:12px;">
+        <button id="btn-show-create" class="btn-link">+ Create New Character</button>
+      </div>
+
+      <div id="character-create" class="char-create" style="display:none;">
         <h3>Create New Character</h3>
         <input type="text" id="char-name" placeholder="Character Name (letters only)" maxlength="20">
         <select id="char-background">
@@ -65,10 +61,17 @@
     <!-- Top bar: room title + description (tap to collapse) -->
     <div id="top-bar">
       <div id="room-title-box" class="room-title-box">
-        <div id="room-title">Ceylon 1802</div>
-        <div id="room-description-text" class="room-description-text"></div>
+        <div id="room-title-row" class="room-title-row" title="Click to collapse or expand description">
+          <div id="room-title">Ceylon 1802</div>
+          <span class="room-title-chevron" aria-hidden="true">▼</span>
+        </div>
+        <div class="room-desc-row">
+          <div id="room-description-text" class="room-description-text"></div>
+          <div id="room-compass-mount" class="room-compass-mount" aria-live="polite">
+            <button type="button" id="btn-map" class="btn-map" title="Map" aria-label="Map">⊞</button>
+          </div>
+        </div>
       </div>
-      <button type="button" id="btn-map" class="btn-map" title="Map" aria-label="Map">⊞</button>
       <div id="player-stats" style="display:none">
         <span id="stat-hp" class="stat" title="Health">HP: --</span>
         <span id="stat-sp" class="stat" title="Stamina">SP: --</span>
@@ -98,27 +101,6 @@
 
     <!-- Bottom controls -->
     <div id="bottom-controls">
-      <!-- Quick action row -->
-      <div id="action-row">
-        <button class="action-btn" data-cmd="inventory">Inv</button>
-        <button class="action-btn" data-cmd="status">Status</button>
-        <button class="action-btn" data-cmd="skills">Skills</button>
-        <button class="action-btn" data-cmd="quests">Quests</button>
-        <button class="action-btn" data-cmd="who">Who</button>
-        <button class="action-btn" data-cmd="help">Help</button>
-      </div>
-
-      <!-- Combat/action row (shown contextually) -->
-      <div id="combat-row" class="hidden">
-        <button class="action-btn combat" data-cmd="attack">Attack</button>
-        <button class="action-btn combat" data-cmd="flee">Flee</button>
-        <button class="action-btn" data-cmd="forage">Forage</button>
-        <button class="action-btn" data-cmd="fish">Fish</button>
-      </div>
-
-      <!-- Hotkey bar -->
-      <div id="hotkey-bar"></div>
-
       <!-- Text input -->
       <div id="input-row">
         <input type="text" id="cmd-input" placeholder="Type command..." autocomplete="off" autocapitalize="off" spellcheck="false">

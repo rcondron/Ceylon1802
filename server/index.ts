@@ -27,7 +27,7 @@ const staticDir = fs.existsSync(path.join(clientPublic, 'index.html'))
   : fs.existsSync(path.join(distClient, 'index.html'))
     ? distClient
     : clientPublic; // fallback for edge cases
-app.use(express.static(staticDir));
+app.use(express.static(staticDir, { etag: false, maxAge: 0 }));
 
 // Explicitly serve index.html at / and /index.html (avoids static path issues)
 const indexPath = path.join(staticDir, 'index.html');
@@ -55,34 +55,59 @@ app.get('/admin', (_req, res) => {
 app.use('/api/admin', adminRouter);
 
 // Auth routes
-app.post('/api/register', (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) { res.status(400).json({ error: 'Username and password required' }); return; }
-  if (username.length < 3 || username.length > 20) { res.status(400).json({ error: 'Username must be 3-20 characters' }); return; }
-  if (password.length < 4) { res.status(400).json({ error: 'Password must be at least 4 characters' }); return; }
-  if (!/^[a-zA-Z0-9_]+$/.test(username)) { res.status(400).json({ error: 'Username: letters, numbers, underscores only' }); return; }
-
-  const existing = db.prepare('SELECT id FROM accounts WHERE username = ?').get(username);
-  if (existing) { res.status(409).json({ error: 'Username taken' }); return; }
-
-  const id = uuid();
-  const hash = bcrypt.hashSync(password, 10);
-  db.prepare('INSERT INTO accounts (id, username, password_hash) VALUES (?, ?, ?)').run(id, username, hash);
-
-  res.json({ accountId: id, username });
-});
-
 app.post('/api/login', (req, res) => {
-  const { username, password } = req.body;
-  const account = db.prepare('SELECT * FROM accounts WHERE username = ?').get(username) as any;
+  const { email, password } = req.body;
+  if (!email || !password) { res.status(400).json({ error: 'Email and password required' }); return; }
+  const account = db.prepare('SELECT * FROM accounts WHERE email = ?').get(email.toLowerCase().trim()) as any;
   if (!account || !bcrypt.compareSync(password, account.password_hash)) {
     res.status(401).json({ error: 'Invalid credentials' });
+    return;
+  }
+  if (account.blocked) {
+    res.status(403).json({ error: 'This account has been blocked.' + (account.blocked_reason ? ' Reason: ' + account.blocked_reason : '') });
     return;
   }
 
   db.prepare("UPDATE accounts SET last_login = datetime('now') WHERE id = ?").run(account.id);
   const characters = db.prepare('SELECT id, name, level, background FROM characters WHERE account_id = ?').all(account.id);
-  res.json({ accountId: account.id, username: account.username, isAdmin: !!account.is_admin, characters });
+  res.json({ accountId: account.id, email: account.email, isAdmin: !!account.is_admin, characters });
+});
+
+// Invite accept — validate token, show email; set password to create account
+app.get('/api/invite/:token', (req, res) => {
+  const invite = db.prepare('SELECT * FROM invites WHERE token = ? AND accepted = 0').get(req.params.token) as any;
+  if (!invite) { res.status(404).json({ error: 'Invalid or expired invite' }); return; }
+  res.json({ email: invite.email, token: invite.token });
+});
+
+app.post('/api/invite/accept', (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) { res.status(400).json({ error: 'Token and password required' }); return; }
+  if (password.length < 4) { res.status(400).json({ error: 'Password must be at least 4 characters' }); return; }
+
+  const invite = db.prepare('SELECT * FROM invites WHERE token = ? AND accepted = 0').get(token) as any;
+  if (!invite) { res.status(404).json({ error: 'Invalid or expired invite' }); return; }
+
+  const existing = db.prepare('SELECT id FROM accounts WHERE email = ?').get(invite.email);
+  if (existing) { res.status(409).json({ error: 'An account with this email already exists' }); return; }
+
+  const id = uuid();
+  const hash = bcrypt.hashSync(password, 10);
+  db.prepare('INSERT INTO accounts (id, email, password_hash) VALUES (?, ?, ?)').run(id, invite.email, hash);
+  db.prepare('UPDATE invites SET accepted = 1 WHERE id = ?').run(invite.id);
+
+  const characters = db.prepare('SELECT id, name, level, background FROM characters WHERE account_id = ?').all(id);
+  res.json({ accountId: id, email: invite.email, characters });
+});
+
+// Serve invite page at /invite/:token
+app.get('/invite/:token', (_req, res) => {
+  const invitePath = path.join(staticDir, 'invite.html');
+  if (fs.existsSync(invitePath)) {
+    res.sendFile(invitePath);
+  } else {
+    res.sendFile(indexPath);
+  }
 });
 
 app.post('/api/characters', (req, res) => {
